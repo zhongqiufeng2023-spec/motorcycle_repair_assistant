@@ -1,0 +1,13 @@
+# 大模型调用
+openai
+python-dotenv
+langgraph
+langchain
+langchain-deepseek
+
+# 检索增强(RAG)
+chromadb
+FlagEmbedding
+sentence-transformers
+rank-bm25
+jieba
