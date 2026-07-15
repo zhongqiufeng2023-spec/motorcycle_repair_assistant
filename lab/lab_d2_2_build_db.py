@@ -13,7 +13,7 @@ print("向量化知识库...")
 vectors = model.encode(DOCS)['dense_vecs']
 
 # 3. 连接Chroma:PersistentClient会把数据落到本地文件夹,重启不丢
-client = chromadb.PersistentClient(path="./chroma_db")
+client = chromadb.PersistentClient(path=os.path.join(os.path.join(os.path.dirname(os.path.dirname(__file__)),"data"),"./chroma_db"))
 
 # 4. 建collection。每次重跑先删,方便调试
 if "manual" in [c.name for c in client.list_collections()]:

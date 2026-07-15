@@ -1,8 +1,9 @@
 from FlagEmbedding import BGEM3FlagModel
-import chromadb
+import chromadb, os
 
 model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=True)
-client = chromadb.PersistentClient(path="./chroma_db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+client = chromadb.PersistentClient(path=os.path.join(BASE_DIR, "data", "chroma_db"))
 collection = client.get_collection("manual")   # 注意是get,不是create
 
 def search(question: str, top_k: int = 4):
