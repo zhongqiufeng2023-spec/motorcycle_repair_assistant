@@ -11,3 +11,6 @@ FlagEmbedding
 sentence-transformers
 rank-bm25
 jieba
+
+# 图数据库(配件兼容查询)
+neo4j

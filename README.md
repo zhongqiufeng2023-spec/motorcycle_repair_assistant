@@ -39,6 +39,12 @@
 - 子问题拆解 — 复合问题拆为独立子问题分别检索再汇总,JSON 解析失败自动降级为单一问题
 - 成本分层路由 — 按"FAQ 缓存 → 意图分类 → 按类分流"逐层拦截,每层用最低成本处理能处理的问题,把检索与查询改写留给真正需要的复杂问题
 
+**图检索(知识图谱)**
+
+- Neo4j — 图数据库,存储"品牌→车型→配件"的配件兼容关系,以 Docker 服务化部署,bolt 协议连接
+- Text2Cypher — LLM 将自然语言问题翻译为 Cypher 查询,注入图谱 schema 提升准确率
+- 查询安全护栏 — 只读强制(正则拦截写操作)+ EXPLAIN 预校验(执行前空跑,校验语法与标签),防止 LLM 生成危险或错误查询
+
 **工程实践**
 
 - 分层架构 — 检索层(HybridRetriever)与生成层解耦,检索策略可独立替换而不影响生成
@@ -72,6 +78,18 @@
 
 生成层严格基于检索资料回答,资料中没有的信息如实告知,不编造(防幻觉),并返回引用的资料条数(可溯源)。
 
+## 架构:图检索与 Text2Cypher(GraphRetriever)
+
+配件兼容性是典型的"精确关系"问题(某年份某车型兼容哪些配件、某配件还适配哪些车型),用知识图谱表达最自然。图谱以"品牌→车型→配件"三级建模,**年份作为兼容关系上的属性**(`year_from` / `year_to`)——刻意不把年份建成独立节点,避免全局共享的年份节点导致跨车型/跨品牌配件被错误串联。
+
+```
+(Brand)──HAS_MODEL──►(Model)──COMPATIBLE_WITH {year_from, year_to}──►(Part)
+
+问题 ─► LLM 生成 Cypher(注入 schema)─► 只读校验 ─► EXPLAIN 预校验 ─► 执行 ─► 结构化事实
+```
+
+GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不负责生成**,维持检索层与生成层解耦。图检索(精确关系)与向量检索(模糊语义)构成互补的双引擎,后续按问题类型动态路由。
+
 ## 已实现功能 / Roadmap
 
 ### ✅ 已完成
@@ -82,11 +100,11 @@
 - 混合检索:BGE-M3 + BM25 + RRF 融合 + BGE-reranker 精排(`app/retriever.py`)
 - 查询理解:FAQ 语义缓存、意图分类、HyDE、子问题拆解(`app/query_processing.py`)
 - 动态路由:FAQ → 意图分类 → 三路分流的完整问答流水线(`app/rag.py`)
+- 图检索:Neo4j 知识图谱 + Text2Cypher(schema 注入 + 只读 / EXPLAIN 双重护栏)(`app/graph_retriever.py`)
 
 ### 🚧 进行中 / 📋 计划中
 
 - 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存),拦截简单问题不进 LLM
-- 📋 Neo4j:图数据库,配件兼容性查询(品牌→车型→年份→配件),Text2Cypher 动态生成 + EXPLAIN 预校验
 - 📋 双引擎路由:按问题类型在向量检索与图检索间动态选择
 - 📋 多 Agent 架构(LangGraph):supervisor 模式,情绪检测 + 意图路由,QAAgent / ActionAgent 分流
 - 📋 情绪拦截:轻量情感模型 + LLM 双层判断
@@ -106,9 +124,11 @@
 ├── app/
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
 │   ├── query_processing.py  # 查询理解:FAQ 语义缓存 / 意图分类 / HyDE / 子问题拆解
-│   └── rag.py               # 主流程:route_and_answer 动态路由 + 生成
+│   ├── rag.py               # 主流程:route_and_answer 动态路由 + 生成
+│   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
 ├── data/
-│   └── moto_manual.py       # Ninja 400 保养手册知识片段(示例数据)
+│   ├── moto_manual.py            # Ninja 400 保养手册知识片段(示例数据)
+│   └── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
 ├── lab/                     # 各阶段学习实验脚本
 │   ├── lab1_hello.py        # DeepSeek API 首次调用
 │   ├── lab2_chat.py         # 多轮对话
@@ -119,8 +139,10 @@
 │   ├── lab6_graph_agent.py  # LangGraph agent + checkpointer 记忆
 │   ├── lab_d2_*.py          # embedding / 建库 / 检索 / RAG 问答
 │   ├── lab_d3_*.py          # BM25 / 混合检索
-│   └── lab_d4_*.py          # 意图分类 / FAQ 缓存 / HyDE / 子问题拆解
+│   ├── lab_d4_*.py          # 意图分类 / FAQ 缓存 / HyDE / 子问题拆解
+│   └── lab_d5_*.py          # Neo4j 连接 / CSV 导入 / Text2Cypher
 ├── requirements.txt
+├── TODO.md                  # 推迟事项清单(YAGNI 停车场)
 └── .env.example             # 环境变量模板
 ```
 
@@ -139,18 +161,24 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. 配置 API key
-# 复制 .env.example 为 .env,填入你的 DeepSeek API key
+# 3. 配置密钥
+# 复制 .env.example 为 .env,填入 DeepSeek API key 与 Neo4j 密码
 cp .env.example .env
 
 # 4. 构建向量库(首次运行会下载 BGE-M3 模型)
 python lab/lab_d2_2_build_db.py
 
-# 5. 运行完整问答流水线(FAQ / 闲聊 / 知识问答 / 故障诊断四类路由演示)
-python app/rag.py
+# 5. 启动 Neo4j 图数据库(Docker),并导入配件兼容数据
+docker run -d --name moto-neo4j -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/your_neo4j_password_here neo4j:5
+python lab/lab_d5_2_import_csv.py
+
+# 6. 运行问答流水线 / 图检索
+python app/rag.py                    # 向量路:FAQ / 闲聊 / 知识 / 诊断四类路由
+python app/graph_retriever.py        # 图路:Text2Cypher 配件兼容查询
 ```
 
-> 注:向量库(`data/chroma_db/`)不进版本控制,clone 后通过第 4 步在本地重建即可。
+> 注:向量库(`data/chroma_db/`)与 Neo4j 数据均不进版本控制,clone 后通过第 4、5 步在本地重建即可。
 
 ## 学习日志
 
