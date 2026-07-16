@@ -45,6 +45,13 @@
 - Text2Cypher — LLM 将自然语言问题翻译为 Cypher 查询,注入图谱 schema 提升准确率
 - 查询安全护栏 — 只读强制(正则拦截写操作)+ EXPLAIN 预校验(执行前空跑,校验语法与标签),防止 LLM 生成危险或错误查询
 
+**多 Agent 编排**
+
+- LangGraph supervisor 模式 — StateGraph 共享状态 + 条件边分发,supervisor 统一决策,QA / Action / chitchat / complaint 四类处理单元各司其职
+- Pydantic 结构化路由 — supervisor 的路由决策以 Pydantic 模型(Literal 枚举)校验 LLM 输出,拦截字段名拼错、取值越界等"合法 JSON 但语义错误"的输出
+- 情绪双层拦截 — 第一层 BGE-M3 对投诉样例做语义匹配(免费、本地),第二层 LLM 判断情绪指向(区分"投诉本店"与"描述故障"),真投诉走安抚话术优先转人工
+- 双引擎动态路由 — 按问题类型在向量检索(模糊语义)与图检索(精确兼容关系)间自动选择
+
 **工程实践**
 
 - 分层架构 — 检索层(HybridRetriever)与生成层解耦,检索策略可独立替换而不影响生成
@@ -90,6 +97,20 @@
 
 GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不负责生成**,维持检索层与生成层解耦。图检索(精确关系)与向量检索(模糊语义)构成互补的双引擎,后续按问题类型动态路由。
 
+## 架构:LangGraph supervisor 多 Agent(agents.py)
+
+整条流水线以 LangGraph StateGraph 组织:所有节点共享一个 State(问题、路由决策、检索资料、答案、溯源信息),supervisor 节点统一决策,条件边按决策分发。**情绪拦截在最前**(先于 FAQ,保证愤怒用户不会被缓存答案打发),FAQ 命中则由 supervisor 直接给答案不再惊动下游。
+
+```
+                        ┌─ complaint: 安抚话术,优先转人工
+用户 ─► supervisor ──┼─ chitchat:  直接回复(FAQ 命中也走这里,不再生成)
+        │ ①情绪双层拦截 ├─ qa:        knowledge→向量检索 / compatibility→图检索 / diagnosis→拆解+HyDE
+        │ ②FAQ 语义缓存 └─ action:    业务办理(占位,HITL 人工审核在 Roadmap)
+        │ ③Pydantic 路由
+```
+
+路由决策用 Pydantic 模型钉死契约(`target` / `strategy` 均为 Literal 枚举),LLM 输出不合法时兜底走最安全的知识检索路线。相比 if 链,图结构的价值在于 State 可持久化——为后续 checkpointer 对话记忆与 interrupt 人工审核(HITL)铺路。
+
 ## 已实现功能 / Roadmap
 
 ### ✅ 已完成
@@ -101,18 +122,18 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 查询理解:FAQ 语义缓存、意图分类、HyDE、子问题拆解(`app/query_processing.py`)
 - 动态路由:FAQ → 意图分类 → 三路分流的完整问答流水线(`app/rag.py`)
 - 图检索:Neo4j 知识图谱 + Text2Cypher(schema 注入 + 只读 / EXPLAIN 双重护栏)(`app/graph_retriever.py`)
+- 双引擎路由:按问题类型在向量检索与图检索间动态选择
+- 情绪拦截:BGE-M3 语义匹配 + LLM 指向判断的双层拦截,真投诉优先安抚转人工
+- 多 Agent 架构:LangGraph supervisor 模式,QA / Action / chitchat / complaint 四路分流(`app/agents.py`)
+- Pydantic:路由决策的结构化输出校验(Literal 枚举 + 解析失败兜底)
 
 ### 🚧 进行中 / 📋 计划中
 
 - 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存),拦截简单问题不进 LLM
-- 📋 双引擎路由:按问题类型在向量检索与图检索间动态选择
-- 📋 多 Agent 架构(LangGraph):supervisor 模式,情绪检测 + 意图路由,QAAgent / ActionAgent 分流
-- 📋 情绪拦截:轻量情感模型 + LLM 双层判断
-- 📋 安全闭环:ActionAgent 工具调用、高危操作 human-in-the-loop 人工审核(LangGraph interrupt)、Reflection 自愈重试
+- 📋 安全闭环:ActionAgent 真实工具调用(当前为占位)、高危操作 human-in-the-loop 人工审核(LangGraph interrupt)、Reflection 自愈重试
 - 📋 MCP(Model Context Protocol):FastMCP 封装工具,agent 动态发现加载
 - 📋 FastAPI:流式对话接口
 - 📋 评估体系:检索命中率、FAQ 拦截率、延迟、Text2Cypher 成功率,LLM-as-judge
-- 📋 Pydantic:结构化输出校验(贯穿各模块)
 - 📋 本地模型:Ollama + Qwen2.5-7B,云端 / 本地双后端切换
 - 📋 Streamlit / Gradio:对话界面
 - 📋 Docker / docker-compose:一键部署全套服务
@@ -122,9 +143,9 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 ```
 .
 ├── app/
+│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成)
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
-│   ├── query_processing.py  # 查询理解:FAQ 语义缓存 / 意图分类 / HyDE / 子问题拆解
-│   ├── rag.py               # 主流程:route_and_answer 动态路由 + 生成
+│   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解
 │   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
 ├── data/
 │   ├── moto_manual.py            # Ninja 400 保养手册知识片段(示例数据)
@@ -140,7 +161,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 │   ├── lab_d2_*.py          # embedding / 建库 / 检索 / RAG 问答
 │   ├── lab_d3_*.py          # BM25 / 混合检索
 │   ├── lab_d4_*.py          # 意图分类 / FAQ 缓存 / HyDE / 子问题拆解
-│   └── lab_d5_*.py          # Neo4j 连接 / CSV 导入 / Text2Cypher
+│   ├── lab_d5_*.py          # Neo4j 连接 / CSV 导入 / Text2Cypher
+│   └── lab_d6_1_emotion.py  # 情感模型实测(该模型已被数据证伪弃用,记录见 commit)
 ├── requirements.txt
 ├── TODO.md                  # 推迟事项清单(YAGNI 停车场)
 └── .env.example             # 环境变量模板
@@ -173,9 +195,9 @@ docker run -d --name moto-neo4j -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/your_neo4j_password_here neo4j:5
 python lab/lab_d5_2_import_csv.py
 
-# 6. 运行问答流水线 / 图检索
-python app/rag.py                    # 向量路:FAQ / 闲聊 / 知识 / 诊断四类路由
-python app/graph_retriever.py        # 图路:Text2Cypher 配件兼容查询
+# 6. 运行完整多 Agent 流水线(投诉/闲聊/FAQ/知识/兼容/诊断/业务 全路由演示)
+python app/agents.py
+python app/graph_retriever.py        # 或单独测图检索:Text2Cypher 配件兼容查询
 ```
 
 > 注:向量库(`data/chroma_db/`)与 Neo4j 数据均不进版本控制,clone 后通过第 4、5 步在本地重建即可。

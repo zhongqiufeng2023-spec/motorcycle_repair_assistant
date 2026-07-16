@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from FlagEmbedding import BGEM3FlagModel
 import numpy as np
+from typing import Literal, Optional
+from pydantic import BaseModel, ValidationError
 
 load_dotenv()
 llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url = "https://api.deepseek.com")
@@ -20,6 +22,14 @@ FAQ_DATA = {
         "客服电话多少", "怎么联系你们", "有没有联系方式"
     ],
 }
+COMPLAINT_EXAMPLES = [
+    "你们这店太坑了,来回折腾三趟,退钱!",
+    "客服态度太差了,一直推脱责任",
+    "买的配件质量太差,装上就坏了",
+    "修了三次还没修好,你们到底行不行",
+    "再不解决我就去消协投诉你们",
+    "我要投诉,这服务太让人失望了",
+]
 
 _faq_questions, _faq_answers = [], []
 for _ans, _qs in FAQ_DATA.items():
@@ -27,29 +37,99 @@ for _ans, _qs in FAQ_DATA.items():
         _faq_questions.append(q)
         _faq_answers.append(_ans)
 _faq_vectors = _embed_model.encode(_faq_questions)['dense_vecs']
+_complaint_vectors = _embed_model.encode(COMPLAINT_EXAMPLES)['dense_vecs']
 
+def _max_similarity(q_vec, vectors) -> tuple[float, int]:
+    """返回最大余弦相似度及其索引"""
+    sims = [np.dot(q_vec, v) / (np.linalg.norm(q_vec) * np.linalg.norm(v)) for v in vectors]
+    best = int(np.argmax(sims))
+    return sims[best], best
+
+def detect_complaint(question: str, threshold: float = 0.65) -> bool:
+    q_vec = _embed_model.encode([question])['dense_vecs'][0]
+    sim, _ = _max_similarity(q_vec, _complaint_vectors)
+    return sim >= threshold
+
+def judge_complaint(question: str) -> bool:
+    """第二层:LLM 判断是否为针对本店的投诉(贵但准,只处理第一层筛出的少数)"""
+    prompt = f"""你是摩托车售后客服系统的投诉识别器。判断用户这句话是不是【针对本店/本公司的投诉或不满】。
+    只回答 yes 或 no,不要解释。
+
+    判断标准:
+    - yes(是投诉):对本店的服务、态度、质量、处理效率表达不满或愤怒。
+    例:"客服态度太差了,一直推脱" / "修了三次还没修好" / "太坑了,退钱"
+    - no(不是投诉):
+    · 只是描述车辆故障,哪怕用词很负面。例:"我的刹车失灵了,太危险了" / "车子异响,烦死了"
+    · 表达感谢或称赞。例:"你们服务真不错"
+    · 普通技术咨询。例:"机油多久换一次"
+
+    用户的话:{question}
+    回答(yes/no):"""
+    resp = llm.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+    # 兜底:LLM 没老实回 yes/no 就当作"不是投诉",走正常流程(至少能给用户答案)
+    return resp.choices[0].message.content.strip().lower().startswith("yes")
+# ==================== 路由决策 ====================
+class RouteDecision(BaseModel):
+    target: Literal["qa", "action", "chitchat", "complaint"]
+    strategy: Optional[Literal["knowledge", "compatibility", "diagnosis"]] = None
+
+def decide_route(question: str) -> RouteDecision:
+    prompt = f"""你是摩托车售后客服系统的路由器。判断用户问题该交给哪个处理单元。
+    以 JSON 返回,不要解释,不要 markdown 代码块。
+
+    返回格式:
+    {{"target": "qa" 或 "action" 或 "chitchat", "strategy": "knowledge" 或 "compatibility" 或 "diagnosis" 或 null}}
+
+    target 说明:
+    - qa: 只读的信息查询(查手册参数、查配件兼容、排查故障)。此时 strategy 必填。
+    - action: 需要【执行操作】(查订单、预约保养、申请退换货、修改订单)。strategy 填 null。
+    - chitchat: 闲聊、问候、感谢。strategy 填 null。
+
+    strategy 说明(仅 target=qa 时):
+    - knowledge: 问参数/规格/保养知识。例:"火花塞电极间隙是多少" / "机油多久换一次"
+    - compatibility: 问"谁配谁"的兼容关系。例:"2020款Ninja 400用什么火花塞" / "CPR8EA-9还能装哪些车"
+    - diagnosis: 描述故障现象、需要排查原因。例:"加速无力还异响"
+
+    用户问题:{question}
+    JSON:"""
+    resp = llm.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+    text = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        return RouteDecision.model_validate_json(text)
+    except ValidationError:
+        return RouteDecision(target="qa", strategy="knowledge")
+    
 def check_faq(question :str, threshold: float = 0.75) -> str | None:
     q_vec = _embed_model.encode([question])['dense_vecs'][0]
 
     # print("q_vec shape:", np.array(q_vec).shape)          # 期望 (dim,),比如 (1024,)
     # print("faq_vec shape:", np.array(_faq_vectors[0]).shape)  # 也应是 (dim,)
     # print("faq count:", len(_faq_vectors))
-    sims = [np.dot(q_vec, fv)/(np.linalg.norm(q_vec)*np.linalg.norm(fv)) for fv in _faq_vectors]
-
-    # print("sims shape:", np.array(sims).shape) 
-    best = int(np.argmax(sims))
-    if sims[best] >= threshold:
+    
+    best_sim, best = _max_similarity(q_vec, _faq_vectors)
+    if best_sim >= threshold:
         return _faq_answers[best]
     return None
 
 # ==================== 意图分类 ====================
 def classify_intent(question: str) ->str :
-    """返回 chitchat / knowledge / diagnosis 之一"""
+    """返回 chitchat / knowledge / diagnosis / compatibility 之一"""
     prompt = f"""你是摩托车客服系统的问题分类器。判断用户问题属于哪一类,只回答类别名,不要解释:
 - chitchat: 闲聊、问候、感谢
 - knowledge: 询问保养、参数、规格等知识性问题
 - diagnosis: 描述故障现象、需要排查原因的复杂问题
-
+- compatibility: 配件兼容查询,特征是"谁配谁"的关系判断:
+  ① 给定确切车型(可含年份),问某个部位该用哪个配件。例:"2020款Ninja 400用什么火花塞"
+  ② 给定确切配件型号,反查它能装在哪些车型上。例:"CPR8EA-9还能装哪些车"
+  反例:只问配件自身的规格/参数(如"火花塞间隙是多少""机油多久换一次"),属于 knowledge,不属此类。
 用户问题:{question}
 类别:"""
     resp = llm.chat.completions.create(
@@ -59,7 +139,7 @@ def classify_intent(question: str) ->str :
     )
     result = resp.choices[0].message.content.strip().lower()
     # 兜底:如果模型没老实返回三个词之一,默认走knowledge(最安全的默认)
-    for valid in ["chitchat", "knowledge", "diagnosis"]:
+    for valid in ["chitchat", "knowledge", "diagnosis","compatibility"]:
         if valid in result:
             return valid
     return "knowledge"
@@ -98,3 +178,17 @@ def decompose_query(question: str) -> list[str]:
         return result if isinstance(result, list) and result else [question]
     except json.JSONDecodeError:
         return [question]   # 解析失败兜底
+    
+if __name__ == "__main__":
+    tests = [
+    ("qa/knowledge",      "火花塞的电极间隙是多少"),
+    ("qa/compatibility",  "我2020年的Ninja 400能用什么火花塞"),
+    ("qa/compatibility",  "NGK CPR8EA-9还能装哪些车"),
+    ("qa/diagnosis",      "我的车最近加速无力还异响"),
+    ("action",            "帮我查一下订单12345到哪了"),        # ← 新
+    ("action",            "我想预约下周六做保养"),              # ← 新
+    ("action",            "这个刹车片我要退货"),                # ← 新
+    ("chitchat",          "谢谢"),
+    ]
+    for expect, q in tests:
+        print(f"{q}\n  期望:{expect}  实际:{decide_route(q)}\n")

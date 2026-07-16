@@ -11,14 +11,24 @@ class GraphRetriever:
     节点(Node):
     - Brand: 品牌。属性: name(如 "Kawasaki")
     - Model: 车型。属性: name(如 "Ninja 400")
-    - Part: 配件。属性: name(如 "NGK CPR8EA-9"), category(类别,如 "火花塞"/"机油"/"刹车油"), part_number(配件号)
+    - Part: 配件。属性: name(如 "NGK CPR8EA-9"), category(类别,如 "火花塞"/"机油"), part_number
 
     关系(Relationship):
     - (Brand)-[:HAS_MODEL]->(Model): 品牌拥有车型
-    - (Model)-[c:COMPATIBLE_WITH]->(Part): 车型兼容配件。关系属性: year_from(起始适用年), year_to(结束适用年)
+    - (Model)-[:COMPATIBLE_WITH]->(Part): 车型兼容配件
+      该关系带属性: year_from(起始适用年), year_to(结束适用年)
 
     重要规则:
-    - 判断某年份是否适用,用 c.year_from <= 年份 AND 年份 <= c.year_to
+    - 要读取或过滤 year_from / year_to,必须先在模式中给这条关系绑定变量,
+      例如写成 -[c:COMPATIBLE_WITH]- 或 <-[c:COMPATIBLE_WITH]-,之后才能用 c.year_from。
+      不绑定就直接引用 c 会报 "Variable c not defined"。
+    - 判断某年份是否适用:c.year_from <= 年份 AND 年份 <= c.year_to
+    - 查询配件时尽量一并返回 c.year_from 和 c.year_to,以便告知用户适用年款。
+
+    示例(反向查询,注意关系上绑定了 c):
+    问:NGK CPR8EA-9 还能装哪些车?
+    Cypher:MATCH (p:Part {name:'NGK CPR8EA-9'})<-[c:COMPATIBLE_WITH]-(m:Model)<-[:HAS_MODEL]-(b:Brand)
+           RETURN b.name, m.name, c.year_from, c.year_to
     """
 
     def __init__(self):
