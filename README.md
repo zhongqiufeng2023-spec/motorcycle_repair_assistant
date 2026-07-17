@@ -52,6 +52,13 @@
 - 情绪双层拦截 — 第一层 BGE-M3 对投诉样例做语义匹配(免费、本地),第二层 LLM 判断情绪指向(区分"投诉本店"与"描述故障"),真投诉走安抚话术优先转人工
 - 双引擎动态路由 — 按问题类型在向量检索(模糊语义)与图检索(精确兼容关系)间自动选择
 
+**Agent 安全闭环(ActionAgent)**
+
+- Function Calling 业务办理 — ActionAgent 以 ReAct 式循环调度业务工具(查订单/预约保养/申请退款,mock 数据真实接口),轮数上限防失控
+- Human-in-the-Loop 人工审核 — 高危操作(退款)执行前经 LangGraph interrupt 暂停,状态存入 checkpointer,商家批准后断点续跑;已驳回操作在本轮内禁止重复申请
+- Reflection 自愈 — 工具失败时 LLM 分析错误并生成修复建议回流重试(≤3 次),超限告警转人工;错误信息内置修复线索(可约日期、格式约束),对资金操作保守不猜测
+- 工具分层 — 工具实现框架无关(未来可平替为业务系统 HTTP 调用),高危名单随工具声明,审批拦截归编排层执行(声明与执行分离)
+
 **工程实践**
 
 - 分层架构 — 检索层(HybridRetriever)与生成层解耦,检索策略可独立替换而不影响生成
@@ -127,11 +134,13 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 情绪拦截:BGE-M3 语义匹配 + LLM 指向判断的双层拦截,真投诉优先安抚转人工
 - 多 Agent 架构:LangGraph supervisor 模式,QA / Action / chitchat / complaint 四路分流(`app/agents.py`)
 - Pydantic:路由决策的结构化输出校验(Literal 枚举 + 解析失败兜底)
+- 安全闭环:ActionAgent 业务工具调用 + interrupt 人工审核(HITL)+ Reflection 自愈重试(`app/tools.py` + `app/agents.py`)
+- LangSmith:全链路可观测,各路由成本分层可视化
 
 ### 🚧 进行中 / 📋 计划中
 
+- 📋 多轮对话记忆:State 挂载 messages 历史(add_messages),支持澄清追问/slot filling
 - 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存),拦截简单问题不进 LLM
-- 📋 安全闭环:ActionAgent 真实工具调用(当前为占位)、高危操作 human-in-the-loop 人工审核(LangGraph interrupt)、Reflection 自愈重试
 - 📋 MCP(Model Context Protocol):FastMCP 封装工具,agent 动态发现加载
 - 📋 FastAPI:流式对话接口
 - 📋 评估体系:检索命中率、FAQ 拦截率、延迟、Text2Cypher 成功率,LLM-as-judge
@@ -144,7 +153,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 ```
 .
 ├── app/
-│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成)
+│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成 + HITL)
+│   ├── tools.py             # 业务工具层:mock 工具 + JSON Schema + 高危名单(框架无关)
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
 │   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解
 │   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
@@ -163,7 +173,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 │   ├── lab_d3_*.py          # BM25 / 混合检索
 │   ├── lab_d4_*.py          # 意图分类 / FAQ 缓存 / HyDE / 子问题拆解
 │   ├── lab_d5_*.py          # Neo4j 连接 / CSV 导入 / Text2Cypher
-│   └── lab_d6_1_emotion.py  # 情感模型实测(该模型已被数据证伪弃用,记录见 commit)
+│   ├── lab_d6_1_emotion.py  # 情感模型实测(该模型已被数据证伪弃用,记录见 commit)
+│   └── lab_d8_1_interrupt.py # LangGraph interrupt/checkpointer 最小验证
 ├── requirements.txt
 ├── TODO.md                  # 推迟事项清单(YAGNI 停车场)
 └── .env.example             # 环境变量模板

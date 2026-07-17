@@ -33,15 +33,32 @@
   - 是什么:`decide_route` 一次返回 target+strategy,是 `classify_intent` 的升级版,两者功能重叠。
   - 状态更新(D6 收尾):rag.py 已删,`classify_intent` 在 app/ 内已无使用者,删除条件已满足。暂留一版,下次动 `query_processing.py` 时顺手删。
 
-- [ ] **action_node 从占位变成真 ActionAgent(D8 主菜)**
-  - 是什么:当前 `action_node` 只返回一句诚实的占位话术。D8 要做:mock 业务工具(查订单/预约/退换货)+ Function Calling 调度 + 高危操作 LangGraph interrupt 人工审核(HITL)+ Reflection 失败自愈重试(≤3 次)。
-  - 为什么现在不做:HITL 依赖 checkpointer/interrupt 基础设施,和 D8 是连体工程;拆开做会返工。
-  - 顺带修:投诉/转人工话术要与真实能力对齐(现在承诺"已转接人工"但无此机制,D8 用"登记工单"类真动作替代)。
+- [x] **action_node 从占位变成真 ActionAgent** ✅ D8 已落地
+  - tools.py(mock 工具+Schema+高危名单)+ Function Calling 循环 + interrupt 审批(denied_tools 防重复申请)+ Reflection(≤3 次,驳回不反思)。
+  - 遗留:投诉话术仍承诺"转人工"但无真实机制,待 D9 API 化时对齐(改"登记工单");多轮追问见下一条。
+
+- [ ] **多轮对话记忆(State 挂 messages 历史)**
+  - 是什么:AgentState 加 `messages: Annotated[list, add_messages]`,同一 thread_id 连续对话时 agent 记得上文——"请问退款原因?"用户下一句回答才接得住(澄清追问/slot filling 的地基)。
+  - 为什么推迟:D8 已重到爆,且多轮记忆牵动 supervisor/所有节点的消息构造方式,是独立的一块工程。
+  - 什么时候回来:D9 做 /chat 端点(session_id=thread_id)时一并做,正好是它的自然形态。
 
 - [ ] **拆出 `models.py` / `schemas.py`**
   - 是什么:把 Pydantic 模型(目前只有 `RouteDecision`)集中到独立文件。
   - 为什么推迟:目前只有一个模型、一个使用者,就近放在 `query_processing.py` 里可读性更好。
   - 什么时候回来:模型多到 3-5 个,或出现跨文件复用时;D9 做 FastAPI 请求/响应模型时会自然触发,和 `config.py` 集中、db 层抽取一起做。
+
+- [ ] **FAQ 误拦截"办理类请求"(加 LLM 意图确认层?)**
+  - 现象(D8 实测):"订单12345这个东西我不想要了,退货"(要**办理**退货)被 FAQ 语义匹配劫走,返回了退货**政策**——答非所问,且 action/HITL 流程全被绕过。
+  - 根因:语义相似度**认话题不认意图**("我要退货"和"退货政策是什么"话题重合)——与情绪层"认话题不认褒贬"(服务真好 vs 服务真差)是同一盲区的两副面孔。
+  - 当前修法(免费):FAQ 样例措辞全部政策问句化("退货政策是什么/怎么退货/退货有什么条件"),删掉与办理语气接近的样例。
+  - 未来方案:复用情绪拦截的**双层模式**——FAQ 语义命中后加一层轻量 LLM 判断"问信息 or 要办事",是办事则放行给 decide_route。代价:FAQ 命中从 0 次 LLM 变 1 次(仍比全链路便宜)。折中:仅在相似度模糊带(如 0.75-0.85)触发确认,高分段直接放行。
+  - 什么时候回来:D10 评估集必须包含"FAQ 误拦率"指标;数据说明误拦真实存在再上这层,别拍脑袋加。
+
+- [ ] **checkpoint 反序列化白名单警告(RouteDecision)**
+  - 现象:挂上 MemorySaver 后每次读档打警告 "Deserializing unregistered type app.query_processing.RouteDecision from checkpoint. This will be blocked in a future version."
+  - 原因:checkpointer 读档要重建自定义类实例,LangGraph 正在收紧为白名单制(防反序列化攻击,同 Java readObject CVE 的思路)。目前仅警告,功能正常。
+  - 修法二选一:①按提示把 ('app.query_processing','RouteDecision') 注册进 allowed_msgpack_modules(D9 查文档);②更优:State 里不存富对象——decision 存 model_dump() 的 dict,Pydantic 只在 LLM 边界校验(序列化边界只过数据不过行为,同 Java 的 DTO 纪律)。
+  - 什么时候回来:D9 工程化时一并处理。
 
 - [ ] **只读的数据库级兜底(Neo4j 只读权限用户)**
   - 是什么:给数据库开一个只有读权限的账号,让数据库本身拒绝写操作,而不只靠应用层关键词扫描。

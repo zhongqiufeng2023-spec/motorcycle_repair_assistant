@@ -1,4 +1,4 @@
-import os, sys
+import os, sys, json, uuid
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.moto_manual import DOCS
 from dotenv import load_dotenv
@@ -10,6 +10,10 @@ from retriever import HybridRetriever
 from graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
 from langsmith.wrappers import wrap_openai
+from app.tools import TOOLS_SCHEMA, TOOL_REGISTRY, HIGH_RISK_TOOLS
+from langgraph.types import interrupt, Command
+from langgraph.checkpoint.memory import MemorySaver
+
 
 load_dotenv()
 llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL")))
@@ -42,6 +46,21 @@ def _generate(question: str, contexts: list[str], source: str = "维修手册") 
     resp = llm.chat.completions.create(model="deepseek-chat",
         messages=[{"role": "user", "content": prompt}])
     return resp.choices[0].message.content
+
+def _reflect_on_failure(tool_name: str, args: dict, error: str, question: str) -> str:
+    """失败分析:给出修复建议(Reflexion 思想:语言反馈代替梯度)"""
+    prompt = f"""工具调用失败,请分析原因并给出一句话建议。
+    工具:{tool_name},参数:{json.dumps(args, ensure_ascii=False)}
+    错误信息:{error}
+    用户原始请求:{question}
+
+    只回答一句话,三选一:
+    - 若能修复(如参数格式不对):给出具体修正方式,例如"订单号可能含多余字符，比如：！,@,#,￥,%,……,&,*,（,）,—,—,+,-,=,？,‘,’,【,】,!,@,#,$,%,^,&,*,(,),_,+,-,=,?,,,.,;,',:,",应尝试 12345"
+    - 若该换别的工具:说明换哪个
+    - 若无法修复(如订单确实不存在、超出政策):回答"无法修复:"加原因,此时不应重试"""
+    resp = llm.chat.completions.create(model="deepseek-chat",
+        messages=[{"role": "user", "content": prompt}], temperature=0)
+    return resp.choices[0].message.content.strip()
 
 def _chitchat_reply(question: str) -> str:
     """闲聊:不检索,直接回"""
@@ -103,8 +122,60 @@ def qa_node(state: AgentState) -> dict:
     return {"answer": _generate(q, all_contexts), "contexts": all_contexts, "sub_questions": sub_questions}
 
 def action_node(state: AgentState) -> dict:
-    # D8 才真做,现在放个诚实的占位
-    return {"answer": "您的业务请求已登记,人工客服将尽快与您联系(业务办理功能建设中)。"}
+
+    q = state["question"]
+    messages = [
+        {"role": "system", "content": "你是摩托车店的业务办理助手。只能通过提供的工具办理业务,"
+            "工具没覆盖的业务如实说明办不了。工具返回失败时,向用户解释原因;"
+            "不要编造任何工具没有返回的信息。用简体中文回复。"},
+        {"role": "user", "content": q},
+    ]
+    fail_count = 0
+    denied_tools = set()
+    for _ in range(5):
+        resp = llm.chat.completions.create(
+            model = "deepseek-chat",messages = messages, tools = TOOLS_SCHEMA, temperature = 0
+        )
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            return {"answer": msg.content}
+        messages.append(msg)
+
+        for tc in msg.tool_calls:
+            fn = TOOL_REGISTRY.get(tc.function.name)
+            try:
+                args = json.loads(tc.function.arguments)
+            except json.JSONDecodeError:
+                args, fn ={},None
+            if fn and tc.function.name in HIGH_RISK_TOOLS:
+                if tc.function.name in denied_tools:
+                     result = {"ok": False, "denied": True,
+                              "error": "该操作已被商家驳回,不可重复申请,请如实告知用户"}
+                else:
+                    approval = interrupt(
+                        {
+                            "type":"approval_request",
+                            "tool":tc.function.name,
+                            "args":args,
+                            "user_quesion":state["question"],
+                        }
+                    )
+                    if approval == "yes":
+                        result = fn(**args)
+                    else:
+                        denied_tools.add(tc.function.name)
+                        result = {"ok": False, "error": "商家审核未通过,退款申请已驳回,将由人工客服跟进处理"}
+            else:        
+                result = fn(**args) if fn else {"ok": False, "error": f"未知工具 {tc.function.name}"}
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
+            if not result.get("ok", True) and not result.get("denied"):
+                fail_count += 1
+                if fail_count>=3:
+                    return {"answer": "抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。","error": f"连续失败{fail_count}次,已转人工"}
+                advice = _reflect_on_failure(tc.function.name, args, result.get("error",""),q)
+                messages.append({"role": "user","content": f"【系统反思】工具 {tc.function.name} 调用失败。分析建议:{advice}。""若建议可执行,请修正后重试;若无法修复,请如实向用户说明,不要再重试。"})
+    return {"answer": "抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。"} 
+
 
 def chitchat_node(state: AgentState) -> dict:
     if state.get("answer"):   # FAQ 已经给过答案,别覆盖
@@ -131,13 +202,13 @@ graph.add_conditional_edges("supervisor", route_by_decision,
 for n in ["qa", "action", "chitchat", "complaint"]:
     graph.add_edge(n, END)
 
-app_graph = graph.compile()
+app_graph = graph.compile(checkpointer=MemorySaver())
 
 
 if __name__ == "__main__":
     tests = [
         # ---- 真投诉:必须走 complaint ----
-        "你们到底几点营业啊，我每次来都是关门的"
+        # "你们到底几点营业啊，我每次来都是关门的"
         # "你们这店太坑了,来回折腾三趟,退钱!",
         # "客服态度也太差了吧,一直推脱",
         # "在你们家修车三次都没修好,太失望了",
@@ -151,9 +222,26 @@ if __name__ == "__main__":
 
         # "我想知道你们的营业时间",              # FAQ
         # "帮我查一下订单12345到哪了",           # action(占位回复)
-    ]
 
-    for i, q in enumerate(tests,1):
-        result = app_graph.invoke({"question": q, "contexts": [], "answer": "", "route": "", "decision": None})
+        # "你们到底几点营业啊，我每次来都是关门的",   # 你的边界用例(情绪×FAQ)
+        # "帮我查一下订单12345到哪了",               # 单工具一轮
+        # "我想约2026-07-18做个常规保养",             # 约满 → 看 LLM 怎么应对(重点)
+        # "订单12347的刹车油我要退货",                # 超7天 → 应如实解释
+        # "查一下订单12346到哪了,顺便约周日的保养",    # 复合 → 两轮两工具
+
+        "订单123-45的火花塞我要退货,买错型号了",   # 高危 → 审核 → 你输 yes → 退款受理
+        # "订单12345这个东西我不想要了,退货",       # 高危 → 审核 → 你输 no  → 驳回话术
+        "帮我查一下订单12-345到哪了",              # 对照:普通工具,不该触发审核
+        # "帮我查一下订单22345到哪了",
+    ]
+    RUN_ID = uuid.uuid4().hex[:8]  
+    for i, q in enumerate(tests, 1):
+        config = {"configurable": {"thread_id": f"{RUN_ID}-test-{i}"}}
+        result = app_graph.invoke({"question": q, "contexts": [], "answer": "",
+                                   "route": "", "decision": None}, config)
+        while "__interrupt__" in result:
+            print(f"对于问题：{q},需要请求人工审核\n⏸ 人工审核请求:{result['__interrupt__'][0].value}")
+            human = input("你是商家审核员,批准吗?(yes/no): ")
+            result = app_graph.invoke(Command(resume=human), config)
         print(f"{i}. 【{result['route']}】{q}")
-        print(f"   {result['answer'][:80]}...")
+        print(f"   {result['answer']}")
