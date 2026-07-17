@@ -9,10 +9,10 @@ from app.query_processing import detect_complaint, judge_complaint, check_faq, d
 from retriever import HybridRetriever
 from graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
-
+from langsmith.wrappers import wrap_openai
 
 load_dotenv()
-llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL"))
+llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL")))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 retriever = HybridRetriever(DOCS, chroma_path = os.path.join(BASE_DIR,"data","chroma_db"))
 graphretriever = GraphRetriever()
@@ -137,19 +137,20 @@ app_graph = graph.compile()
 if __name__ == "__main__":
     tests = [
         # ---- 真投诉:必须走 complaint ----
-        "你们这店太坑了,来回折腾三趟,退钱!",
-        "客服态度也太差了吧,一直推脱",
-        "在你们家修车三次都没修好,太失望了",
-        # ---- 关键对照:负面词一堆,但不是投诉,必须走 diagnosis ----
-        "我的刹车失灵了,太危险了",
-        "车子异响,烦死了",
-        # ---- 防回归:确认没把老功能搞坏 ----
-        "火花塞的电极间隙是多少",              # knowledge
-        "我2020年的Ninja 400能用什么火花塞",   # compatibility
-        "客服态度好了,一直很负责任",          # 夸奖,不是投诉
+        "你们到底几点营业啊，我每次来都是关门的"
+        # "你们这店太坑了,来回折腾三趟,退钱!",
+        # "客服态度也太差了吧,一直推脱",
+        # "在你们家修车三次都没修好,太失望了",
+        # # ---- 关键对照:负面词一堆,但不是投诉,必须走 diagnosis ----
+        # "我的刹车失灵了,太危险了",
+        # "车子异响,烦死了",
+        # # ---- 防回归:确认没把老功能搞坏 ----
+        # "火花塞的电极间隙是多少",              # knowledge
+        # "我2020年的Ninja 400能用什么火花塞",   # compatibility
+        # "客服态度好了,一直很负责任",          # 夸奖,不是投诉
 
-        "我想知道你们的营业时间",              # FAQ
-        "帮我查一下订单12345到哪了",           # action(占位回复)
+        # "我想知道你们的营业时间",              # FAQ
+        # "帮我查一下订单12345到哪了",           # action(占位回复)
     ]
 
     for i, q in enumerate(tests,1):

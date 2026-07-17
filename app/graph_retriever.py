@@ -2,7 +2,7 @@ import os, re
 from dotenv import load_dotenv
 from openai import OpenAI
 from neo4j import GraphDatabase
-
+from langsmith.wrappers import wrap_openai
 
 class GraphRetriever:
     WRITE_PATTERN = r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DETACH|DROP)\b"
@@ -33,8 +33,8 @@ class GraphRetriever:
 
     def __init__(self):
         load_dotenv()
-        self.llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
-                          base_url="https://api.deepseek.com")
+        self.llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
+                          base_url=os.getenv("BASE_URL")))
         self.driver = GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),

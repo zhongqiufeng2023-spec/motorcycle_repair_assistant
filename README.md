@@ -55,6 +55,7 @@
 **工程实践**
 
 - 分层架构 — 检索层(HybridRetriever)与生成层解耦,检索策略可独立替换而不影响生成
+- LangSmith 全链路可观测 — LangGraph 节点自动上报 + wrap_openai 包裹裸 SDK 客户端,每次请求的完整调用树(prompt 原文 / token / 延迟)可视化,各路由的成本分层有据可查
 - Git 版本管理
 
 ## 架构:混合检索模块(HybridRetriever)

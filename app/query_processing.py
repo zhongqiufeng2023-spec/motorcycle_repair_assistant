@@ -5,9 +5,10 @@ from FlagEmbedding import BGEM3FlagModel
 import numpy as np
 from typing import Literal, Optional
 from pydantic import BaseModel, ValidationError
+from langsmith.wrappers import wrap_openai
 
 load_dotenv()
-llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url = "https://api.deepseek.com")
+llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url = os.getenv("BASE_URL")))
 # FAQ匹配要用向量,复用BGE-M3
 _embed_model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=True)
 # ==================== FAQ 匹配 ====================
@@ -72,6 +73,7 @@ def judge_complaint(question: str) -> bool:
     )
     # 兜底:LLM 没老实回 yes/no 就当作"不是投诉",走正常流程(至少能给用户答案)
     return resp.choices[0].message.content.strip().lower().startswith("yes")
+
 # ==================== 路由决策 ====================
 class RouteDecision(BaseModel):
     target: Literal["qa", "action", "chitchat", "complaint"]
@@ -104,7 +106,7 @@ def decide_route(question: str) -> RouteDecision:
     text = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
     try:
         return RouteDecision.model_validate_json(text)
-    except ValidationError:
+    except (ValidationError, ValueError):
         return RouteDecision(target="qa", strategy="knowledge")
     
 def check_faq(question :str, threshold: float = 0.75) -> str | None:
