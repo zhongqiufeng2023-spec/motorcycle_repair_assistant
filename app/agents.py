@@ -6,13 +6,15 @@ from openai import OpenAI
 from typing import TypedDict, Optional
 from app.query_processing import RouteDecision
 from app.query_processing import detect_complaint, judge_complaint, check_faq, decide_route, decompose_query, generate_hyde
-from retriever import HybridRetriever
-from graph_retriever import GraphRetriever
+from app.retriever import HybridRetriever
+from app.graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
 from langsmith.wrappers import wrap_openai
 from app.tools import TOOLS_SCHEMA, TOOL_REGISTRY, HIGH_RISK_TOOLS
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph.message import add_messages
+from typing import Annotated
 
 
 load_dotenv()
@@ -20,10 +22,12 @@ llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.gete
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 retriever = HybridRetriever(DOCS, chroma_path = os.path.join(BASE_DIR,"data","chroma_db"))
 graphretriever = GraphRetriever()
+_ROLE_MAP = {"human": "user", "ai": "assistant"}
 
 class AgentState(TypedDict):
+    messages: Annotated[list,add_messages]
     question: str                        # 用户问题(入口塞进来)
-    decision: Optional[RouteDecision]    # supervisor 的决策
+    decision: Optional[dict]    # supervisor 的决策
     contexts: list[str]                  # 检索到的资料
     answer: str                          # 最终答案
     route: str                           # 走过的路线(调试/评估用)
@@ -72,41 +76,50 @@ def _complaint_reply(question: str) -> str:
     """投诉:先安抚,不辩解不甩参数,告知转人工"""
     resp = llm.chat.completions.create(model="deepseek-chat",
         messages=[{"role": "user", "content": f"""你是摩托车店的客服主管。用户正在投诉,请用真诚、简短的话安抚他。
-    不要辩解,不要甩技术参数,表达歉意,并告知已为他转接人工客服跟进。
+    不要辩解,不要甩技术参数,表达歉意,并告知已为他登记工单,人工客服会尽快跟进。
     用简体中文回复,不要夹杂英文单词。
 
     用户的话:{question}"""}],
         temperature=0.3)   # 安抚话术要点人情味,不要死板
     return resp.choices[0].message.content
 
+def _history(state: AgentState, n: int = 10) -> list[dict]:
+    out = []
+    for m in state["messages"][-n:]:
+        role = _ROLE_MAP.get(m.type)
+        if role is None:
+            continue
+        out.append({"role":role,"content":m.content})
+    return out
+
+def _final(answer: str, **extra) -> dict:
+    """终局补丁:答案 + 记入对话史"""
+    return {"answer": answer, "messages": [{"role": "assistant", "content": answer}], **extra}
+        
 def supervisor_node(state : AgentState) -> dict:
     q = state["question"]
     if detect_complaint(q) and judge_complaint(q):
-        return {"decision": RouteDecision(target = "complaint"),"route": "complaint"}
+        return {"decision": RouteDecision(target = "complaint").model_dump(),"route": "complaint"}
     faq = check_faq(q)
     if faq:
-        return {"decision": RouteDecision(target="chitchat"),"answer": faq, "route":"FAQ"}
+        return _final(faq,decision=RouteDecision(target="chitchat").model_dump(), route="FAQ")
     d = decide_route(q)
-    return {"decision": d, "route": f"{d.target}/{d.strategy or '-'}"}
+    return {"decision": d.model_dump(), "route": f"{d.target}/{d.strategy or '-'}"}
 
 def qa_node(state: AgentState) -> dict:
-    strategy = state["decision"].strategy
+    strategy = state["decision"]["strategy"]
     q = state["question"]
     if strategy == "knowledge":
         # 普通知识问题:直接混合检索 → 生成
         contexts = retriever.retrieve(q, top_k=3)
-        return {"answer": _generate(q, contexts), "contexts": contexts}
+        return _final(_generate(q, contexts), contexts = contexts)
     if strategy == "compatibility":
         result = graphretriever.retrieve(q)
         if not result["ok"]:
-            return {
-                    "answer": "抱歉,查询配件图谱时出错了,换个说法再试试?",
-                    "contexts": [], "cypher": result.get("cypher"),
-                    "error": result.get("error")}
+            return _final("抱歉,查询配件图谱时出错了,换个说法再试试?", contexts = [], cypher= result.get("cypher"), error = result.get("error"))
         contexts = [str(row) for row in result["rows"]]
         source="配件兼容知识图谱的查询结果(每一行都是与用户问题匹配的兼容记录)"
-        
-        return {"answer": _generate(q, contexts,source = source),"contexts": contexts, "cypher": result["cypher"]}
+        return _final( _generate(q, contexts,source = source), contexts = contexts, cypher = result["cypher"])
 
     # 复杂问题:先改写,再检索
     # 策略1:先拆解成子问题
@@ -119,17 +132,15 @@ def qa_node(state: AgentState) -> dict:
         all_contexts.extend(ctxs)
     # 去重(不同子问题可能检索到同一条)
     all_contexts = list(dict.fromkeys(all_contexts))
-    return {"answer": _generate(q, all_contexts), "contexts": all_contexts, "sub_questions": sub_questions}
+    return _final(_generate(q, all_contexts), contexts = all_contexts, sub_questions = sub_questions)
+
 
 def action_node(state: AgentState) -> dict:
-
     q = state["question"]
     messages = [
         {"role": "system", "content": "你是摩托车店的业务办理助手。只能通过提供的工具办理业务,"
             "工具没覆盖的业务如实说明办不了。工具返回失败时,向用户解释原因;"
-            "不要编造任何工具没有返回的信息。用简体中文回复。"},
-        {"role": "user", "content": q},
-    ]
+            "不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
     fail_count = 0
     denied_tools = set()
     for _ in range(5):
@@ -138,7 +149,7 @@ def action_node(state: AgentState) -> dict:
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            return {"answer": msg.content}
+            return _final(msg.content)
         messages.append(msg)
 
         for tc in msg.tool_calls:
@@ -171,23 +182,23 @@ def action_node(state: AgentState) -> dict:
             if not result.get("ok", True) and not result.get("denied"):
                 fail_count += 1
                 if fail_count>=3:
-                    return {"answer": "抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。","error": f"连续失败{fail_count}次,已转人工"}
+                    return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。", error = f"连续失败{fail_count}次,已转人工" )
                 advice = _reflect_on_failure(tc.function.name, args, result.get("error",""),q)
                 messages.append({"role": "user","content": f"【系统反思】工具 {tc.function.name} 调用失败。分析建议:{advice}。""若建议可执行,请修正后重试;若无法修复,请如实向用户说明,不要再重试。"})
-    return {"answer": "抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。"} 
+    return _final("抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。")
 
 
 def chitchat_node(state: AgentState) -> dict:
     if state.get("answer"):   # FAQ 已经给过答案,别覆盖
         return {}
-    return {"answer": _chitchat_reply(state["question"])}
+    return _final(_chitchat_reply(state["question"]))
 
 def complaint_node(state: AgentState) -> dict:
-    return {"answer": _complaint_reply(state["question"])}
+    return _final( _complaint_reply(state["question"]))
 
 def route_by_decision(state: AgentState) -> str:
     """条件边:读公文包,报下一站的名字"""
-    return state["decision"].target
+    return state["decision"]["target"]
 
 graph = StateGraph(AgentState)
 graph.add_node("supervisor", supervisor_node)
@@ -237,7 +248,7 @@ if __name__ == "__main__":
     RUN_ID = uuid.uuid4().hex[:8]  
     for i, q in enumerate(tests, 1):
         config = {"configurable": {"thread_id": f"{RUN_ID}-test-{i}"}}
-        result = app_graph.invoke({"question": q, "contexts": [], "answer": "",
+        result = app_graph.invoke({"question": q, "messages":[{"role": "user", "content": q}],"contexts": [], "answer": "",
                                    "route": "", "decision": None}, config)
         while "__interrupt__" in result:
             print(f"对于问题：{q},需要请求人工审核\n⏸ 人工审核请求:{result['__interrupt__'][0].value}")

@@ -37,10 +37,27 @@
   - tools.py(mock 工具+Schema+高危名单)+ Function Calling 循环 + interrupt 审批(denied_tools 防重复申请)+ Reflection(≤3 次,驳回不反思)。
   - 遗留:投诉话术仍承诺"转人工"但无真实机制,待 D9 API 化时对齐(改"登记工单");多轮追问见下一条。
 
-- [ ] **多轮对话记忆(State 挂 messages 历史)**
-  - 是什么:AgentState 加 `messages: Annotated[list, add_messages]`,同一 thread_id 连续对话时 agent 记得上文——"请问退款原因?"用户下一句回答才接得住(澄清追问/slot filling 的地基)。
-  - 为什么推迟:D8 已重到爆,且多轮记忆牵动 supervisor/所有节点的消息构造方式,是独立的一块工程。
-  - 什么时候回来:D9 做 /chat 端点(session_id=thread_id)时一并做,正好是它的自然形态。
+- [x] **多轮对话记忆(State 挂 messages 历史)** ✅ D9 已落地
+  - `messages: Annotated[list, add_messages]` + 入口塞用户消息 + `_final()` 统一记账 + `_history()` 翻译层(LangChain 对象→openai dict,滑动窗口 n=10)。
+  - 落地范围:**账本五路全记,读者只开通 action**(跨轮续办业务已验证:不重报订单号即可退款)。qa/supervisor 读历史见下面两条新 TODO。
+
+- [ ] **对话式 RAG:qa 路读历史(指代消解改写后再检索)**
+  - 是什么:用户先问火花塞再问"那多久换一次?",需先用历史把问题改写成完整问法,再进检索——直接拿指代性问题检索,召回是垃圾。
+  - 为什么推迟:独立的一块工程(改写 prompt + 评估改写质量),D9 已满载。
+  - 什么时候回来:D10 评估集里放几条多轮指代用例,数据说明损失有多大再决定优先级。
+
+- [ ] **supervisor 路由读历史(裸回复场景)**
+  - 是什么:agent 反问"请问订单号?"后用户光回一句"12345",decide_route 没有上下文会迷路(大概率误进 qa)。
+  - 什么时候回来:与上一条同批;届时 decide_route 加最近几条历史作路由上下文。
+
+- [ ] **ActionAgent 接入 MCP(工具动态发现进主流水线)**
+  - 是什么:action_node 启动时经 MCP 客户端 `tools/list` 发现工具、`tools/call` 调用,替代本地 TOOLS_SCHEMA/TOOL_REGISTRY。
+  - 为什么推迟(刻意决策):工具与 Agent 当前**同进程**,MCP 的互操作收益尚不存在;接入需在同步 action 循环里桥接异步客户端,且 D8 验证过的 interrupt/反思链路要全部重测——为不存在的收益付真实复杂度。协议层已在 lab 验证(lab_d9_1 服务器 + lab_d9_2 动态发现)。
+  - 什么时候回来:二期 Spring Boot 业务系统独立部署时(工具真正住进另一个进程,HTTP 传输),或 D12 工程化若有余力。
+
+- [ ] **MemorySaver 换持久化 checkpointer**
+  - 是什么:当前 checkpoint 在 uvicorn 进程内存里,重启服务=所有会话(含挂起中的审批)蒸发。
+  - 什么时候回来:D12 工程化/二期(SqliteSaver 或 RedisSaver,顺带解决多实例部署的会话共享)。
 
 - [ ] **拆出 `models.py` / `schemas.py`**
   - 是什么:把 Pydantic 模型(目前只有 `RouteDecision`)集中到独立文件。
@@ -54,11 +71,9 @@
   - 未来方案:复用情绪拦截的**双层模式**——FAQ 语义命中后加一层轻量 LLM 判断"问信息 or 要办事",是办事则放行给 decide_route。代价:FAQ 命中从 0 次 LLM 变 1 次(仍比全链路便宜)。折中:仅在相似度模糊带(如 0.75-0.85)触发确认,高分段直接放行。
   - 什么时候回来:D10 评估集必须包含"FAQ 误拦率"指标;数据说明误拦真实存在再上这层,别拍脑袋加。
 
-- [ ] **checkpoint 反序列化白名单警告(RouteDecision)**
-  - 现象:挂上 MemorySaver 后每次读档打警告 "Deserializing unregistered type app.query_processing.RouteDecision from checkpoint. This will be blocked in a future version."
-  - 原因:checkpointer 读档要重建自定义类实例,LangGraph 正在收紧为白名单制(防反序列化攻击,同 Java readObject CVE 的思路)。目前仅警告,功能正常。
-  - 修法二选一:①按提示把 ('app.query_processing','RouteDecision') 注册进 allowed_msgpack_modules(D9 查文档);②更优:State 里不存富对象——decision 存 model_dump() 的 dict,Pydantic 只在 LLM 边界校验(序列化边界只过数据不过行为,同 Java 的 DTO 纪律)。
-  - 什么时候回来:D9 工程化时一并处理。
+- [x] **checkpoint 反序列化白名单警告(RouteDecision)** ✅ D9 已修
+  - 采用方案②:State 不存富对象——decision 经 `model_dump()` 脱壳成 dict 再入 State,Pydantic 只在 LLM 输出边界校验(序列化边界只过数据不过行为,同 Java 的 DTO 纪律)。警告消除。
+  - 同批完成:投诉话术与真实能力对齐("转接人工"→"登记工单,人工客服尽快跟进")。
 
 - [ ] **只读的数据库级兜底(Neo4j 只读权限用户)**
   - 是什么:给数据库开一个只有读权限的账号,让数据库本身拒绝写操作,而不只靠应用层关键词扫描。

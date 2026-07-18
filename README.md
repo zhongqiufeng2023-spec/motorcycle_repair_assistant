@@ -59,6 +59,18 @@
 - Reflection 自愈 — 工具失败时 LLM 分析错误并生成修复建议回流重试(≤3 次),超限告警转人工;错误信息内置修复线索(可约日期、格式约束),对资金操作保守不猜测
 - 工具分层 — 工具实现框架无关(未来可平替为业务系统 HTTP 调用),高危名单随工具声明,审批拦截归编排层执行(声明与执行分离)
 
+**服务化与多轮记忆**
+
+- FastAPI 后端服务 — `/chat` 对话端点 + `/approve` 商家审批端点,session_id 即 LangGraph thread_id;interrupt 审批以"pending_approval 状态 + 二次请求恢复"的异步模式承载(不占连接等待人工)
+- 多轮对话记忆 — State 挂载 `messages` 历史(`add_messages` reducer 追加式合并),checkpointer 按 thread_id 持久化;跨轮上下文使 ActionAgent 无需用户重复订单号即可续办业务
+- 同步/异步边界治理 — 请求处理函数走 FastAPI 线程池(同步 def),避免 CPU 密集的 embedding 与阻塞 LLM 调用冻结事件循环
+- 序列化边界纪律 — checkpoint 内只存纯数据(dict),Pydantic 模型仅在 LLM 输出边界校验后即脱壳,规避自定义类反序列化风险
+
+**MCP(Model Context Protocol)**
+
+- FastMCP 工具服务器 — 业务工具经 `@mcp.tool` 以 MCP 协议暴露(类型标注自动生成 JSON Schema),业务逻辑与协议外壳分离
+- 动态发现 — MCP 客户端运行时经 `tools/list` 发现工具清单并 `tools/call` 调用,工具供给侧可独立演化(lab 验证,主流水线接入在 Roadmap)
+
 **工程实践**
 
 - 分层架构 — 检索层(HybridRetriever)与生成层解耦,检索策略可独立替换而不影响生成
@@ -113,7 +125,7 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
                         ┌─ complaint: 安抚话术,优先转人工
 用户 ─► supervisor ──┼─ chitchat:  直接回复(FAQ 命中也走这里,不再生成)
         │ ①情绪双层拦截 ├─ qa:        knowledge→向量检索 / compatibility→图检索 / diagnosis→拆解+HyDE
-        │ ②FAQ 语义缓存 └─ action:    业务办理(占位,HITL 人工审核在 Roadmap)
+        │ ②FAQ 语义缓存 └─ action:    业务办理(Function Calling 循环 + interrupt 人工审核 + Reflection 自愈)
         │ ③Pydantic 路由
 ```
 
@@ -136,13 +148,16 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - Pydantic:路由决策的结构化输出校验(Literal 枚举 + 解析失败兜底)
 - 安全闭环:ActionAgent 业务工具调用 + interrupt 人工审核(HITL)+ Reflection 自愈重试(`app/tools.py` + `app/agents.py`)
 - LangSmith:全链路可观测,各路由成本分层可视化
+- FastAPI 服务化:`/chat` + `/approve` 端点,审批的"暂停-恢复"经 HTTP 两段式交互完成(`app/api.py`)
+- 多轮对话记忆:State 挂载 messages 历史(add_messages reducer),ActionAgent 跨轮续办业务
+- MCP:FastMCP 服务器封装业务工具 + 客户端动态发现(`lab/lab_d9_*.py`)
 
 ### 🚧 进行中 / 📋 计划中
 
-- 📋 多轮对话记忆:State 挂载 messages 历史(add_messages),支持澄清追问/slot filling
+- 📋 MCP 接入主流水线:ActionAgent 经 MCP 客户端动态加载工具(当前为本地注册表)
+- 📋 检索的多轮改写:用对话历史改写指代性问题后再检索(对话式 RAG)
 - 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存),拦截简单问题不进 LLM
-- 📋 MCP(Model Context Protocol):FastMCP 封装工具,agent 动态发现加载
-- 📋 FastAPI:流式对话接口
+- 📋 FastAPI 流式响应(SSE)
 - 📋 评估体系:检索命中率、FAQ 拦截率、延迟、Text2Cypher 成功率,LLM-as-judge
 - 📋 本地模型:Ollama + Qwen2.5-7B,云端 / 本地双后端切换
 - 📋 Streamlit / Gradio:对话界面
@@ -153,7 +168,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 ```
 .
 ├── app/
-│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成 + HITL)
+│   ├── api.py               # FastAPI 服务:/chat 对话 + /approve 商家审批(session_id=thread_id)
+│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成 + HITL + 多轮记忆)
 │   ├── tools.py             # 业务工具层:mock 工具 + JSON Schema + 高危名单(框架无关)
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
 │   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解

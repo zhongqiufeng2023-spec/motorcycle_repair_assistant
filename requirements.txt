@@ -14,3 +14,10 @@ jieba
 
 # 图数据库(配件兼容查询)
 neo4j
+
+# 服务化(API 后端)
+fastapi
+uvicorn
+
+# MCP(工具协议封装)
+fastmcp
