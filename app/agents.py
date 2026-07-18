@@ -20,7 +20,8 @@ from typing import Annotated
 load_dotenv()
 llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL")))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-retriever = HybridRetriever(DOCS, chroma_path = os.path.join(BASE_DIR,"data","chroma_db"))
+with open(os.path.join(BASE_DIR, "data", "manual_chunks.json"), encoding="utf-8") as f:MANUAL_CHUNKS = [c["text"] for c in json.load(f)]
+retriever = HybridRetriever(MANUAL_CHUNKS + DOCS, chroma_path = os.path.join(BASE_DIR,"data","chroma_db"))
 graphretriever = GraphRetriever()
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
 
@@ -240,10 +241,11 @@ if __name__ == "__main__":
         # "订单12347的刹车油我要退货",                # 超7天 → 应如实解释
         # "查一下订单12346到哪了,顺便约周日的保养",    # 复合 → 两轮两工具
 
-        "订单123-45的火花塞我要退货,买错型号了",   # 高危 → 审核 → 你输 yes → 退款受理
+        # "订单123-45的火花塞我要退货,买错型号了",   # 高危 → 审核 → 你输 yes → 退款受理
         # "订单12345这个东西我不想要了,退货",       # 高危 → 审核 → 你输 no  → 驳回话术
-        "帮我查一下订单12-345到哪了",              # 对照:普通工具,不该触发审核
+        # "帮我查一下订单12-345到哪了",              # 对照:普通工具,不该触发审核
         # "帮我查一下订单22345到哪了",
+        "Ninja 400 的机油容量是多少"
     ]
     RUN_ID = uuid.uuid4().hex[:8]  
     for i, q in enumerate(tests, 1):

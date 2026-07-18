@@ -37,3 +37,7 @@ Thumbs.db
 # 日志与临时文件
 *.log
 tmp/
+
+# 版权手册原件及其衍生语料(本地 RAG 语料,不进仓库)
+data/raw_manuals/
+data/manual_chunks.json
