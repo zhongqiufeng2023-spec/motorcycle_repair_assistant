@@ -73,6 +73,18 @@
   - 修法:try/except 降级为仅 DOCS 启动 + 打警告;README 写清"跑 lab_d10_1/2 重建语料"。
   - 什么时候回来:D12 仓库公开前必须做。
 
+- [ ] **interrupt 与 LLM 同居一节点:重放非确定性风险(复习日实验实锤,2026-07-19)**
+  - 实验:s9 退款挂起 → 同 session 插问"查订单12346" → 旧 interrupt 被新一轮作废,但 LLM 从 messages 账本里"复活"退款、产生新 interrupt(payload 的 user_question 已变为新问题,铁证);商家此时 /approve yes → 200 done,但重放时 LLM(temp=0 仍漂移)改走"查单+反问退款原因"路径,未再调 request_refund → interrupt 未被执行,yes 无人消费,**退款未执行且零报错**。
+  - 根因:interrupt 的"确定性重放"承诺被重放路径上的 LLM 调用破坏(工作流引擎要求重放代码确定性,LLM 天然不满足)。
+  - 修法:①把审批拆进无 LLM 的确定性小节点(工具调用决策先提交 State,审批节点只做 interrupt+执行已锁定调用);②或审批工单化与对话流解耦(二期 Spring Boot 方案,与 /approve 鉴权同批)。另:/chat 对"pending 中插新话"应有明确策略(提示挂起审批存在)。
+  - 什么时候回来:二期业务系统设计时;D13 面试讲稿必收此实验(设计实验→证伪预测→发现脆弱性→架构结论,完整方法论闭环)。
+
+- [ ] **/approve 端点鉴权(作者复习日自己发现的真漏洞)**
+  - 现象:/approve 无任何认证,用户拿着自己的 session_id 就能自批退款(POST /approve decision=yes),HITL 闸门形同虚设。
+  - 辨析:诱导 LLM 说 yes 是打不穿的(approval 的数据源只有 Command(resume),与 LLM 输出通道不相交);真正的洞在端点裸奔。
+  - 修法:认证 + 角色授权(商家角色才能调 /approve),用户端/商家端两个受众分离;审批操作留审计日志。
+  - 什么时候回来:D12 工程化或二期(Spring Boot 网关做鉴权是自然位置)。
+
 - [ ] **MemorySaver 换持久化 checkpointer**
   - 是什么:当前 checkpoint 在 uvicorn 进程内存里,重启服务=所有会话(含挂起中的审批)蒸发。
   - 什么时候回来:D12 工程化/二期(SqliteSaver 或 RedisSaver,顺带解决多实例部署的会话共享)。

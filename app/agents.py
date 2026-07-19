@@ -161,22 +161,21 @@ def action_node(state: AgentState) -> dict:
                 args, fn ={},None
             if fn and tc.function.name in HIGH_RISK_TOOLS:
                 if tc.function.name in denied_tools:
-                     result = {"ok": False, "denied": True,
-                              "error": "该操作已被商家驳回,不可重复申请,请如实告知用户"}
+                    result = {"ok": False, "denied": True,"error": "该操作已被商家驳回,不可重复申请,请如实告知用户"}
                 else:
                     approval = interrupt(
                         {
                             "type":"approval_request",
                             "tool":tc.function.name,
                             "args":args,
-                            "user_quesion":state["question"],
+                            "user_question":state["question"],
                         }
                     )
                     if approval == "yes":
                         result = fn(**args)
                     else:
                         denied_tools.add(tc.function.name)
-                        result = {"ok": False, "error": "商家审核未通过,退款申请已驳回,将由人工客服跟进处理"}
+                        result = {"ok": False, "denied": True,"error": "商家审核未通过,退款申请已驳回,将由人工客服跟进处理"}
             else:        
                 result = fn(**args) if fn else {"ok": False, "error": f"未知工具 {tc.function.name}"}
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
