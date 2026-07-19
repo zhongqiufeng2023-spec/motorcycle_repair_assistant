@@ -22,7 +22,9 @@ class ApproveRequest(BaseModel):
 def _to_response(result: dict) -> ChatResponse:
     """invoke 结果 → HTTP 响应。/chat 和 /approve 共用(同一套判断,抽出来)"""
     if "__interrupt__" in result:
-        return ChatResponse(status="pending_approval",approval_request=result["__interrupt__"][0].value)
+        # answer 仅为挂起时给用户的 UX 交代(不进账本)。治标不治本:
+        # 它不能阻止"用户插新问 → 僵尸退款从记忆复活"。根治靠二期工单化(见 TODO)。
+        return ChatResponse(status="pending_approval",answer="您的退款申请已提交,正在等待商家审核,请勿重复发起。",approval_request=result["__interrupt__"][0].value)
     return ChatResponse(status="done", answer=result.get("answer"))
 
 @app.post("/chat", response_model = ChatResponse)
