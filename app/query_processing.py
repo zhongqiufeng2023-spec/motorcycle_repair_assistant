@@ -151,6 +151,35 @@ def classify_intent(question: str) ->str :
             return valid
     return "knowledge"
 
+# ==================== 历史记忆合成 ====================
+def rewrite_with_history(question: str, history: list[dict]) -> str:
+    """用对话历史把指代性问题改写成独立问题。无历史或无指代则原样返回。"""
+    if len(history) <= 1:
+        return question               # 只有本轮问题、无更早上文,无需改写(省一次 LLM 调用)
+    # TODO 你写:把 history + 当前 question 给 LLM,要求它输出一个"不依赖上下文也能懂"的独立问题
+    #   prompt 要点:
+    #   - 给出最近几轮对话 + 当前问题
+    #   - 要求:如果当前问题含指代("那""它""这个")或省略,用历史补全成完整问题
+    #   - 如果本身已完整,原样返回,不要画蛇添足
+    #   - 只返回改写后的问题一句话,temperature=0
+    prompt = f"""下面是最近的对话历史和用户当前的问题。请把当前问题改写成一个不依赖上下文、能独立理解的问题。
+    - 若当前问题含指代(那/它/这个)或省略了主语,用历史补全成完整问题。
+    - 若本身已完整,原样返回,不要改动。
+    - 只输出改写后的问题本身,不要任何解释、引号或前缀。
+
+    对话历史:
+    {history}
+
+    当前问题:{question}
+
+    改写后的问题:"""
+    resp = llm.chat.completions.create(
+        model="deepseek-chat",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+    return resp.choices[0].message.content.strip()
+
 # ==================== 查询改写:HyDE ====================
 def generate_hyde(question: str) -> str:
     """生成假设性答案,用作检索诱饵"""

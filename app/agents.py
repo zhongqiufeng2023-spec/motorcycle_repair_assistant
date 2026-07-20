@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from typing import TypedDict, Optional
 from app.query_processing import RouteDecision
-from app.query_processing import detect_complaint, judge_complaint, check_faq, decide_route, decompose_query, generate_hyde
+from app.query_processing import detect_complaint, judge_complaint, check_faq, decide_route, decompose_query, generate_hyde, rewrite_with_history
 from app.retriever import HybridRetriever
 from app.graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
@@ -109,7 +109,7 @@ def supervisor_node(state : AgentState) -> dict:
 
 def qa_node(state: AgentState) -> dict:
     strategy = state["decision"]["strategy"]
-    q = state["question"]
+    q = rewrite_with_history(state["question"], _history(state))
     if strategy == "knowledge":
         # 普通知识问题:直接混合检索 → 生成
         contexts = retriever.retrieve(q, top_k=3)
