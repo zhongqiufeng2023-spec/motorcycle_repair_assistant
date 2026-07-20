@@ -1,0 +1,349 @@
+[
+  {
+    "id": "faq-01",
+    "category": "faq_hit",
+    "input": "你们周日休息吗",
+    "expected_route": "FAQ",
+    "expected_points": ["周日休息"],
+    "note": "营业时间 FAQ 的改写(非样例原句),测泛化"
+  },
+  {
+    "id": "faq-02",
+    "category": "faq_hit",
+    "input": "早上几点开门",
+    "expected_route": "FAQ",
+    "expected_points": ["9:00"],
+    "note": "营业时间 FAQ"
+  },
+  {
+    "id": "faq-03",
+    "category": "faq_hit",
+    "input": "有没有联系电话",
+    "expected_route": "FAQ",
+    "expected_points": ["400"],
+    "note": "客服电话 FAQ"
+  },
+  {
+    "id": "faq-04",
+    "category": "faq_hit",
+    "input": "怎么打电话找到你们",
+    "expected_route": "FAQ",
+    "expected_points": ["400"],
+    "note": "客服电话 FAQ 改写"
+  },
+  {
+    "id": "faqmiss-01",
+    "category": "faq_miss_action",
+    "input": "我想约个时间过去做保养",
+    "expected_route": "action/-",
+    "expected_points": [],
+    "note": "办理类,语义近'营业时间'但应走 action 不被 FAQ 拦。退货 FAQ 已停用,误拦风险当前较低,此为探针"
+  },
+  {
+    "id": "faqmiss-02",
+    "category": "faq_miss_action",
+    "input": "订单12345这个我不想要了想退掉",
+    "expected_route": "action/-",
+    "expected_points": [],
+    "note": "办理退货措辞;历史上曾被退货政策 FAQ 劫持,现该 FAQ 已停用,应正常进 action 触发审批"
+  },
+  {
+    "id": "know-01",
+    "category": "knowledge",
+    "input": "火花塞电极间隙是多少",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["0.8", "0.9"],
+    "note": "DOCS 事实:0.8-0.9mm"
+  },
+  {
+    "id": "know-02",
+    "category": "knowledge",
+    "input": "放油螺栓拧多大扭矩",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["29"],
+    "note": "DOCS 事实:29 牛·米"
+  },
+  {
+    "id": "know-03",
+    "category": "knowledge",
+    "input": "冷却液多久换一次",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["3年"],
+    "note": "DOCS 事实:每3年"
+  },
+  {
+    "id": "know-04",
+    "category": "knowledge",
+    "input": "前后轮胎气压建议多少",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["2.0", "2.25"],
+    "note": "DOCS 事实:前2.0 后2.25 bar"
+  },
+  {
+    "id": "know-05",
+    "category": "knowledge",
+    "input": "链条松紧到什么程度算正常",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["25", "35"],
+    "note": "DOCS 事实:中段晃动25-35mm"
+  },
+  {
+    "id": "know-06",
+    "category": "knowledge",
+    "input": "刹车油要用什么规格多久换",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["DOT4", "两年"],
+    "note": "DOCS 事实:DOT4,每两年"
+  },
+  {
+    "id": "know-07",
+    "category": "knowledge",
+    "input": "机油滤清器扭矩多少",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["17"],
+    "note": "DOCS 事实:17 牛·米"
+  },
+  {
+    "id": "comp-01",
+    "category": "compatibility",
+    "input": "我2020款Ninja 400该用哪种火花塞",
+    "expected_route": "qa/compatibility",
+    "expected_points": ["CPR8EA-9"],
+    "note": "带年份;图谱 Ninja400 火花塞 CPR8EA-9(2018-2023)"
+  },
+  {
+    "id": "comp-02",
+    "category": "compatibility",
+    "input": "Ninja 400的火花塞是什么型号",
+    "expected_route": "qa/compatibility",
+    "expected_points": ["CPR8EA-9"],
+    "note": "不带年份;测缺年份时能否优雅返回(当前每车型单行)"
+  },
+  {
+    "id": "comp-03",
+    "category": "compatibility",
+    "input": "NGK CPR8EA-9这个火花塞还能装在哪些车上",
+    "expected_route": "qa/compatibility",
+    "expected_points": ["Ninja 400", "Z400"],
+    "note": "反查配件→车型;图谱应含 Ninja400/Z400"
+  },
+  {
+    "id": "comp-04",
+    "category": "compatibility",
+    "input": "本田CB400用的机油滤清器货号是多少",
+    "expected_route": "qa/compatibility",
+    "expected_points": ["15410-MFJ-D01"],
+    "note": "跨品牌;测年份属性建模是否防串台(本田件不该漏进川崎)"
+  },
+  {
+    "id": "comp-05",
+    "category": "compatibility",
+    "input": "Yamaha MT-07的链条用哪款",
+    "expected_route": "qa/compatibility",
+    "expected_points": ["DID 520"],
+    "note": "图谱 MT-07 链条 DID 520。【已确认真 bug】图数据正确(MT-07-[COMPATIBLE_WITH]->DID 520 链条 存在),但 Text2Cypher 生成的查询没命中,答案称'MT-07未列出'。子串指标假阳性放过了它,需 LLM-judge 才能识别。待查 Text2Cypher"
+  },
+  {
+    "id": "diag-01",
+    "category": "diagnosis",
+    "input": "我的车最近加速无力还伴随异响是怎么回事",
+    "expected_route": "qa/diagnosis",
+    "expected_points": [],
+    "note": "故障排查;走拆解+HyDE"
+  },
+  {
+    "id": "diag-02",
+    "category": "diagnosis",
+    "input": "冷车启动后怠速不稳还容易熄火",
+    "expected_route": "qa/diagnosis",
+    "expected_points": [],
+    "note": "多症状复合故障"
+  },
+  {
+    "id": "chat-01",
+    "category": "chitchat",
+    "input": "谢谢你啊",
+    "expected_route": "chitchat/-",
+    "expected_points": [],
+    "note": "感谢"
+  },
+  {
+    "id": "chat-02",
+    "category": "chitchat",
+    "input": "在吗你好",
+    "expected_route": "chitchat/-",
+    "expected_points": [],
+    "note": "问候"
+  },
+  {
+    "id": "chat-03",
+    "category": "chitchat",
+    "input": "你们家师傅手艺真不错,修得挺好",
+    "expected_route": "chitchat/-",
+    "expected_points": [],
+    "note": "夸奖;对照投诉——话题相近(服务)但褒义,不该误判 complaint"
+  },
+  {
+    "id": "complaint-01",
+    "category": "complaint_real",
+    "input": "在你们这修了半天越修越糟,必须给我退钱",
+    "expected_route": "complaint",
+    "expected_points": [],
+    "note": "真投诉;新说法(非样例原句),防数据泄漏"
+  },
+  {
+    "id": "complaint-02",
+    "category": "complaint_real",
+    "input": "预约了还让我白跑一趟,你们也太不靠谱了",
+    "expected_route": "complaint",
+    "expected_points": [],
+    "note": "真投诉;新说法"
+  },
+  {
+    "id": "complaint-03",
+    "category": "complaint_real",
+    "input": "打了好几次电话都没人管,是要拖到什么时候",
+    "expected_route": "complaint",
+    "expected_points": [],
+    "note": "真投诉;新说法"
+  },
+  {
+    "id": "complaint-ctrl-01",
+    "category": "complaint_control",
+    "input": "我的刹车突然失灵了,太危险了",
+    "expected_route": "qa/diagnosis",
+    "expected_points": [],
+    "note": "对照组:负面词描述故障,非投诉。情绪第二层应放行到 diagnosis"
+  },
+  {
+    "id": "complaint-ctrl-02",
+    "category": "complaint_control",
+    "input": "车子最近异响烦死了到底哪出问题",
+    "expected_route": "qa/diagnosis",
+    "expected_points": [],
+    "note": "对照组:负面情绪但指向故障非本店"
+  },
+  {
+    "id": "action-01",
+    "category": "action_single",
+    "input": "帮我查一下订单12346到哪了",
+    "expected_route": "action/-",
+    "expected_points": ["配送中"],
+    "note": "单工具 query_order;12346=DID链条/配送中"
+  },
+  {
+    "id": "action-02",
+    "category": "action_single",
+    "input": "我想预约2026-07-20做个常规保养",
+    "expected_route": "action/-",
+    "expected_points": ["预约"],
+    "note": "单工具 book_service;07-20 可约"
+  },
+  {
+    "id": "action-03",
+    "category": "action_single",
+    "input": "帮我约2026-07-18的保养",
+    "expected_route": "action/-",
+    "expected_points": ["满", "19日", "20日"],
+    "note": "约满场景;应如实告知并给可约日期。要点用鲁棒最小串(满/19日/20日),避免'已满'vs'满了'假阴性"
+  },
+  {
+    "id": "action-04",
+    "category": "action_highrisk",
+    "input": "订单12345的火花塞我要退货,买错型号了",
+    "expected_route": "action/-",
+    "expected_points": [],
+    "note": "高危;应触发 interrupt 审批(评估脚本对 pending_approval 单独判定)"
+  },
+  {
+    "id": "action-05",
+    "category": "action_highrisk",
+    "input": "订单12347的刹车油我想退掉",
+    "expected_route": "action/-",
+    "expected_points": ["超过", "7天"],
+    "note": "已签收15天超7天;若审批通过工具应拒,应如实解释政策。要点改'超过'(系统用词)对齐实际输出"
+  },
+  {
+    "id": "action-06",
+    "category": "action_compound",
+    "input": "查一下订单12346到哪了,顺便帮我约2026-07-20的保养",
+    "expected_route": "action/-",
+    "expected_points": ["配送中", "预约"],
+    "note": "复合;两轮两工具"
+  },
+  {
+    "id": "action-07",
+    "category": "action_single",
+    "input": "帮我查订单12-345的状态",
+    "expected_route": "action/-",
+    "expected_points": [],
+    "note": "带连字符;测自愈(错误信息提示去符号重试→改查12345)"
+  },
+  {
+    "id": "multiturn-01",
+    "category": "multiturn_coref",
+    "turns": [
+      {"input": "火花塞的电极间隙是多少", "expected_route": "qa/knowledge", "expected_points": ["0.8", "0.9"]},
+      {"input": "那多久换一次", "expected_route": "qa/knowledge", "expected_points": ["12000"], "note": "指代'那'=火花塞;当前 qa 不读历史,预期失败——评估用于量化对话式RAG缺口"}
+    ],
+    "note": "多轮指代;已知缺口,期望暴露"
+  },
+  {
+    "id": "multiturn-02",
+    "category": "multiturn_coref",
+    "turns": [
+      {"input": "帮我查一下订单12345到哪了", "expected_route": "action/-", "expected_points": ["已签收"]},
+      {"input": "这个我不想要了,帮我退了吧", "expected_route": "action/-", "expected_points": [], "note": "指代'这个'=12345;action 读历史,应从上文挖出订单号发起退款审批,不重问"}
+    ],
+    "note": "多轮续办;action 已开通读历史,期望成功(已验证)"
+  },
+  {
+    "id": "multiturn-03",
+    "category": "multiturn_coref",
+    "turns": [
+      {"input": "帮我约2026-07-18的保养", "expected_route": "action/-", "expected_points": ["满"]},
+      {"input": "那就约后一天吧", "expected_route": "action/-", "expected_points": ["预约"], "note": "指代'后一天';测 action 能否结合上文推出 07-19"}
+    ],
+    "note": "多轮 slot 续填"
+  },
+  {
+    "id": "conflict-01",
+    "category": "multi_source_conflict",
+    "input": "Ninja 400的机油容量是多少",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["1.6", "2.0"],
+    "note": "多源冲突:DOCS写1.8L,官方手册写1.6/2.0L。期望生成层呈现冲突/以官方为准,不编造单一值。评估此项重在答案质量(LLM-judge),非严格命中"
+  },
+  {
+    "id": "know-08",
+    "category": "knowledge",
+    "input": "换机油该加什么标号的机油",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["10W-40"],
+    "note": "DOCS 事实:10W-40 或 10W-50"
+  },
+  {
+    "id": "diag-03",
+    "category": "diagnosis",
+    "input": "跑起来车头发抖过减速带更明显是什么原因",
+    "expected_route": "qa/diagnosis",
+    "expected_points": [],
+    "note": "故障排查"
+  },
+  {
+    "id": "action-08",
+    "category": "action_single",
+    "input": "帮我查下订单99999",
+    "expected_route": "action/-",
+    "expected_points": ["不存在"],
+    "note": "订单不存在;工具失败应如实告知(测错误处理,不该幻觉)"
+  },
+  {
+    "id": "chat-04",
+    "category": "chitchat",
+    "input": "哈喽,今天天气不错啊",
+    "expected_route": "chitchat/-",
+    "expected_points": [],
+    "note": "闲聊;不检索"
+  }
+]

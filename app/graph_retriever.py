@@ -24,6 +24,16 @@ class GraphRetriever:
       不绑定就直接引用 c 会报 "Variable c not defined"。
     - 判断某年份是否适用:c.year_from <= 年份 AND 年份 <= c.year_to
     - 查询配件时尽量一并返回 c.year_from 和 c.year_to,以便告知用户适用年款。
+    - 品牌名在图中一律用英文存储:Honda / Yamaha / Kawasaki / Suzuki / KTM。
+      用户若用中文(本田/雅马哈/川崎/铃木/KTM),必须翻译成英文再匹配,例如 本田→Honda。
+      车型名保持原样(如 MT-07、CB400、Ninja 400)。
+    - RETURN 必须让每行结果"自解释":正向查询要带上车型名 m.name,反向查询要带上 b.name 和 m.name。
+      否则答案层只拿到孤立的配件数据(如"DID 520 链条"),无法确认是哪辆车的,会误判成"没查到"。
+
+    示例(正向查询,RETURN 带 m.name 让结果自解释):
+    问:Yamaha MT-07 的链条用哪款?
+    Cypher:MATCH (b:Brand {name:'Yamaha'})-[:HAS_MODEL]->(m:Model {name:'MT-07'})-[c:COMPATIBLE_WITH]->(p:Part {category:'链条'})
+           RETURN m.name, p.name, p.part_number, c.year_from, c.year_to
 
     示例(反向查询,注意关系上绑定了 c):
     问:NGK CPR8EA-9 还能装哪些车?
