@@ -42,3 +42,8 @@ tmp/
 # 版权手册原件及其衍生语料(本地 RAG 语料,不进仓库)
 data/raw_manuals/
 data/manual_chunks.json
+
+# 前端(Node)构建产物与依赖
+node_modules/
+frontend/dist/
+frontend/.vite/
