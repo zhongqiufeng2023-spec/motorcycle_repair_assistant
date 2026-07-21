@@ -1,6 +1,23 @@
 # Motorcycle Repair Assistant 摩托车售后智能助手
 
-基于 RAG + Agent 的摩托车后市场售后问答助手:面向维修保养场景(以川崎 Ninja 400 为起点),回答机油规格、扭矩参数、配件型号等专业问题,目标是逐步演进为多 Agent 架构的完整售后服务系统。
+基于 LangGraph 的摩托车后市场智能客服 Agent:面向维修保养场景(以川崎 Ninja 400 为起点),覆盖专业问答(混合检索 RAG + 知识图谱)、多 Agent 路由、情绪拦截、业务办理(Function Calling + 人工审核 HITL + Reflection 自愈),并已服务化(FastAPI)、多轮记忆、接入可观测(LangSmith),配自建评估体系。
+
+```
+                              ┌─────────────── 检索/知识 ───────────────┐
+用户 ──HTTP──► FastAPI          │  HybridRetriever: BGE-M3 + BM25          │
+ (/chat        (app/api.py)     │      → RRF 融合 → BGE-reranker 精排      │
+  /approve)        │            │  GraphRetriever: Text2Cypher → Neo4j     │
+                   ▼            └──────────────────────────────────────────┘
+            LangGraph supervisor 图 (app/agents.py)          ▲
+              ├─ ①情绪双层拦截  ②FAQ 语义缓存  ③Pydantic 路由 │
+              ├─ qa       ── knowledge / compatibility / diagnosis(检索前指代消解改写)
+              ├─ action   ── Function Calling 循环 + interrupt 人工审核 + Reflection 自愈
+              ├─ chitchat ── 直接回复
+              └─ complaint── 安抚 + 登记工单
+              State + MemorySaver(按 thread_id 多轮记忆 / 审批暂停-恢复)
+                   │
+              LangSmith 全链路可观测
+```
 
 ## 项目背景
 
@@ -140,7 +157,7 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 向量检索:BGE-M3 embedding + ChromaDB 向量库
 - 混合检索:BGE-M3 + BM25 + RRF 融合 + BGE-reranker 精排(`app/retriever.py`)
 - 查询理解:FAQ 语义缓存、意图分类、HyDE、子问题拆解(`app/query_processing.py`)
-- 动态路由:FAQ → 意图分类 → 三路分流的完整问答流水线(`app/rag.py`)
+- 动态路由:FAQ → Pydantic 路由 → 多路分流的完整问答流水线(`app/agents.py` + `app/query_processing.py`)
 - 图检索:Neo4j 知识图谱 + Text2Cypher(schema 注入 + 只读 / EXPLAIN 双重护栏)(`app/graph_retriever.py`)
 - 双引擎路由:按问题类型在向量检索与图检索间动态选择
 - 情绪拦截:BGE-M3 语义匹配 + LLM 指向判断的双层拦截,真投诉优先安抚转人工
@@ -150,18 +167,37 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - LangSmith:全链路可观测,各路由成本分层可视化
 - FastAPI 服务化:`/chat` + `/approve` 端点,审批的"暂停-恢复"经 HTTP 两段式交互完成(`app/api.py`)
 - 多轮对话记忆:State 挂载 messages 历史(add_messages reducer),ActionAgent 跨轮续办业务
+- 对话式 RAG:qa 检索前用对话历史做指代消解改写(`rewrite_with_history`,"那多久换一次"→"火花塞多久换一次")
 - MCP:FastMCP 服务器封装业务工具 + 客户端动态发现(`lab/lab_d9_*.py`)
+- 真实语料入库:6 本车主手册 PDF → 逐页提取 + 定长/重叠切块 + 来源前缀 → 1093 块 + 8 内置片段(`lab/lab_d10_1_ingest.py` + `lab/lab_d10_2_build_corpus_db.py`)
+- 评估体系:43 条评估集(13 维度)+ 评估脚本,产出路由/命中/延迟/审批指标(`data/eval_set.json` + `lab/lab_d10_3_eval.py`,详见下方「评估结果」)
 
 ### 🚧 进行中 / 📋 计划中
 
+- 📋 审批工单化:审批脱离对话线程,独立工单 + 状态机 + 结果回推(彻底解决长时审批与对话并行)
+- 📋 用户系统 + 持久化:user_id 鉴权、持久 checkpointer(重启不丢会话)、跨会话长期记忆
 - 📋 MCP 接入主流水线:ActionAgent 经 MCP 客户端动态加载工具(当前为本地注册表)
-- 📋 检索的多轮改写:用对话历史改写指代性问题后再检索(对话式 RAG)
-- 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存),拦截简单问题不进 LLM
+- 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存)
 - 📋 FastAPI 流式响应(SSE)
-- 📋 评估体系:检索命中率、FAQ 拦截率、延迟、Text2Cypher 成功率,LLM-as-judge
 - 📋 本地模型:Ollama + Qwen2.5-7B,云端 / 本地双后端切换
-- 📋 Streamlit / Gradio:对话界面
+- 📋 前端:用户聊天窗 + 商家审批控制台
 - 📋 Docker / docker-compose:一键部署全套服务
+- 📋 LLM-as-judge:答案质量自动评分(当前命中率用要点匹配)
+
+## 评估结果
+
+自建 43 条评估集(`data/eval_set.json`,覆盖 FAQ 命中/误拦、knowledge、compatibility(含带/不带年份)、diagnosis、chitchat、真投诉 vs 负面词描述故障、action(单工具/复合/高危审批)、多轮指代、多源冲突共 13 个维度;投诉用例刻意不复用检测样例以防数据泄漏),经进程内 `invoke` 直接读取路由与检索上下文计算指标(`lab/lab_d10_3_eval.py`)。
+
+| 指标 | 结果 | 说明 |
+|---|---|---|
+| 路由准确率 | **~98%** | 46 条评估上全对;集合偏小且 prompt 对其迭代过,诚实报 ~98% 而非满分 |
+| 检索要点命中率 | **~97%** | 期望要点出现在检索上下文/答案中的比例 |
+| FAQ 拦截 / 误拦 | 命中 **100%** / 误拦 **0** | 办理类措辞不被 FAQ 劫持 |
+| 投诉识别 | 召回 **100%** / 对照组误报 **0** | "刹车失灵""异响"等负面词描述故障正确判为 diagnosis |
+| 端到端延迟 | P50 **3.9s** / P95 14.4s | 慢尾为 diagnosis(子问题拆解 + HyDE 多次检索) |
+| 高危审批触发 | 按需 | 超期退款经工具 description 预检直接拒,无需惊动审批 |
+
+> 评估过程反向发现并修复了 2 个真实缺陷:①图查询 `RETURN` 遗漏车型名导致答案误判"未找到"(修:返回自解释字段);②品牌中英不一致 + "货号"措辞被路由误判(修:schema 中英映射 + 路由锚点判据)。此外暴露的对话式多轮指代缺口,已由检索前改写(`rewrite_with_history`)闭环。
 
 ## 项目结构
 
@@ -175,60 +211,66 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 │   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解
 │   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
 ├── data/
-│   ├── moto_manual.py            # Ninja 400 保养手册知识片段(示例数据)
-│   └── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
-├── lab/                     # 各阶段学习实验脚本
-│   ├── lab1_hello.py        # DeepSeek API 首次调用
-│   ├── lab2_chat.py         # 多轮对话
-│   ├── lab3_tool.py         # Function Calling
-│   ├── lab4_agent.py        # agent loop
-│   ├── lab5_graph.py        # LangGraph StateGraph
-│   ├── lab5b_router.py      # 条件边路由
-│   ├── lab6_graph_agent.py  # LangGraph agent + checkpointer 记忆
+│   ├── moto_manual.py            # 内置保养知识片段(8 条,兜底语料)
+│   ├── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
+│   ├── eval_set.json             # 评估集(43 条,13 维度)
+│   ├── eval_results.json         # 评估运行结果(逐条明细,评估脚本产出)
+│   └── raw_manuals/              # 手册 PDF 原件(版权物,不入库;本地自备)
+├── lab/                     # 各阶段学习实验脚本(验证通过后沉淀为 app/ 正式模块)
+│   ├── lab1_hello.py ~ lab6_graph_agent.py   # 基础:API / 多轮 / Function Calling / agent loop / LangGraph
 │   ├── lab_d2_*.py          # embedding / 建库 / 检索 / RAG 问答
 │   ├── lab_d3_*.py          # BM25 / 混合检索
 │   ├── lab_d4_*.py          # 意图分类 / FAQ 缓存 / HyDE / 子问题拆解
 │   ├── lab_d5_*.py          # Neo4j 连接 / CSV 导入 / Text2Cypher
-│   ├── lab_d6_1_emotion.py  # 情感模型实测(该模型已被数据证伪弃用,记录见 commit)
-│   └── lab_d8_1_interrupt.py # LangGraph interrupt/checkpointer 最小验证
-├── requirements.txt
-├── TODO.md                  # 推迟事项清单(YAGNI 停车场)
+│   ├── lab_d6_1_emotion.py  # 情感模型实测(被数据证伪弃用,记录见 commit)
+│   ├── lab_d8_1_interrupt.py # LangGraph interrupt/checkpointer 最小验证
+│   ├── lab_d9_1_mcp_server.py / lab_d9_2_mcp_client.py  # MCP 服务器 + 客户端动态发现
+│   ├── lab_d10_1_ingest.py  # 手册 PDF → 切片(逐页提取 + 定长/重叠 + 来源前缀)
+│   ├── lab_d10_2_build_corpus_db.py  # 切片 + 内置 DOCS → Chroma 向量库(幂等重建)
+│   └── lab_d10_3_eval.py    # 评估脚本:跑评估集,产出路由/命中/延迟/审批指标
+├── requirements.txt         # 依赖(锁版本)
+├── VISION.md                # 产品愿景(骑行全周期助手,分期规划)
+├── TODO.md                  # 推迟事项清单(YAGNI 停车场)+ 二期蓝图
 └── .env.example             # 环境变量模板
 ```
 
 ## 快速开始
 
 ```bash
-# 1. 克隆仓库
+# 1. 克隆 + 虚拟环境 + 依赖
 git clone https://github.com/zhongqiufeng2023-spec/motorcycle_repair_assistant.git
 cd motorcycle_repair_assistant
-
-# 2. 创建虚拟环境并安装依赖
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. 配置密钥
-# 复制 .env.example 为 .env,填入 DeepSeek API key 与 Neo4j 密码
+# 2. 配置密钥:复制模板,填入 DeepSeek API key、Neo4j 密码、(可选)LangSmith
 cp .env.example .env
 
-# 4. 构建向量库(首次运行会下载 BGE-M3 模型)
-python lab/lab_d2_2_build_db.py
+# 3. 构建向量库(向量库与手册衍生语料均不入库,须本地构建;首次会下载 BGE-M3 模型)
+#    3a. 把车主手册 PDF 放进 data/raw_manuals/(版权物,自备)
+python lab/lab_d10_1_ingest.py           # 切片:PDF → data/manual_chunks.json
+python lab/lab_d10_2_build_corpus_db.py  # 向量化:切片 + 内置 DOCS → Chroma 向量库
 
-# 5. 启动 Neo4j 图数据库(Docker),并导入配件兼容数据
+# 4. 启动 Neo4j 图数据库(Docker)并导入配件兼容数据
 docker run -d --name moto-neo4j -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/your_neo4j_password_here neo4j:5
 python lab/lab_d5_2_import_csv.py
 
-# 6. 运行完整多 Agent 流水线(投诉/闲聊/FAQ/知识/兼容/诊断/业务 全路由演示)
+# 5. 启动 API 服务,浏览器开 http://localhost:8000/docs 交互
+uvicorn app.api:app --port 8000
+#   /chat   对话(普通问答 / 业务办理;高危操作返回 pending_approval)
+#   /approve 商家审批(同一 session_id 恢复挂起的高危操作)
+
+# (可选)命令行跑完整多 Agent 流水线演示 / 单独测图检索
 python app/agents.py
-python app/graph_retriever.py        # 或单独测图检索:Text2Cypher 配件兼容查询
+python app/graph_retriever.py
+
+# (可选)跑评估集,产出路由准确率 / 命中率 / 延迟等指标
+python lab/lab_d10_3_eval.py
 ```
 
-> 注:向量库(`data/chroma_db/`)与 Neo4j 数据均不进版本控制,clone 后通过第 4、5 步在本地重建即可。
+> **不入版本控制、需本地重建的**:向量库 `data/chroma_db/`、手册 PDF `data/raw_manuals/`、切片 `data/manual_chunks.json`、Neo4j 数据。手册是版权物,请自备 PDF 后跑第 3 步;缺语料时程序会明确提示先构建。
 
 ## 学习日志
 

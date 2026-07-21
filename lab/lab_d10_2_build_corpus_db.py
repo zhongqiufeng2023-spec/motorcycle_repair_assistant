@@ -17,6 +17,12 @@ CHROMA_PATH = os.path.join(BASE_DIR, "data", "chroma_db")
 
 def main():
     # 1. 合成语料:手册 chunks(已带【来源 P页】前缀)+ 8 条手写中文 DOCS
+    #    manual_chunks.json 由 lab_d10_1 切片产出、不入库;缺它就明确报错,不静默降级。
+    if not os.path.exists(CHUNKS_PATH):
+        raise FileNotFoundError(
+            "未找到 data/manual_chunks.json,请先跑切片:python lab/lab_d10_1_ingest.py"
+            "(需先把手册 PDF 放进 data/raw_manuals/)"
+        )
     with open(CHUNKS_PATH, encoding="utf-8") as f:
         chunks = json.load(f)
     corpus = [c["text"] for c in chunks] + list(DOCS)

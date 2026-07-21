@@ -20,7 +20,18 @@ from typing import Annotated
 load_dotenv()
 llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL")))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-with open(os.path.join(BASE_DIR, "data", "manual_chunks.json"), encoding="utf-8") as f:MANUAL_CHUNKS = [c["text"] for c in json.load(f)]
+_chunks_path = os.path.join(BASE_DIR, "data", "manual_chunks.json")
+# 手册是版权物、衍生语料与向量库均不入库。缺语料就明确报错并给出构建步骤,不静默降级
+# (静默用 8 条 DOCS 硬撑会让人误以为有全量手册,更隐蔽)。
+if not os.path.exists(_chunks_path):
+    raise FileNotFoundError(
+        "缺少语料 data/manual_chunks.json。使用前请先构建语料库:\n"
+        "  1) 把手册 PDF 放进 data/raw_manuals/\n"
+        "  2) python lab/lab_d10_1_ingest.py          # 切片:PDF → manual_chunks.json\n"
+        "  3) python lab/lab_d10_2_build_corpus_db.py  # 向量化:切片 + 内置DOCS → Chroma 向量库\n"
+    )
+with open(_chunks_path, encoding="utf-8") as f:
+    MANUAL_CHUNKS = [c["text"] for c in json.load(f)]
 retriever = HybridRetriever(MANUAL_CHUNKS + DOCS, chroma_path = os.path.join(BASE_DIR,"data","chroma_db"))
 graphretriever = GraphRetriever()
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
