@@ -79,7 +79,25 @@ class RouteDecision(BaseModel):
     target: Literal["qa", "action", "chitchat", "complaint"]
     strategy: Optional[Literal["knowledge", "compatibility", "diagnosis"]] = None
 
-def decide_route(question: str) -> RouteDecision:
+def decide_route(question: str, history: list[dict] | None = None) -> RouteDecision:
+    # 有历史才注入:让路由在多轮里读懂"是/12345/日期"这类只在上文成立的裸回复;
+    # 无历史(单轮)时 history_block 为空,prompt 与原来逐字一致,不动 46 条评估基线。
+    history_block = ""
+    if history:
+        lines = "\n".join(
+            f"    {'用户' if m['role'] == 'user' else '助手'}: {m['content']}"
+            for m in history
+        )
+        history_block = f"""
+    【最近对话历史】(仅供理解上下文;判断路由请以下面的【用户问题】那一句为准)
+{lines}
+
+    结合历史的两条判据:
+    - 以【用户问题】那一句为主判断路由;历史只用于消解指代和省略,别被旧话题带偏。
+      例:上文在办退款,当前【用户问题】却问"机油多久换一次",应判 qa/knowledge,不是 action。
+    - 若【用户问题】是对助手上一句追问的简短回答("是/对/嗯"、一串纯数字、一个日期),
+      归到那句追问所属的处理单元——上文助手在办业务(查单/预约/退款)就判 action。
+"""
     prompt = f"""你是摩托车售后客服系统的路由器。判断用户问题该交给哪个处理单元。
     以 JSON 返回,不要解释,不要 markdown 代码块。
 
@@ -100,7 +118,7 @@ def decide_route(question: str) -> RouteDecision:
       前提:问句里必须出现【具体车型】(如 Ninja 400、CB400、MT-07)或【具体配件型号】(如 CPR8EA-9)作为锚点;
       若两者都没有(只笼统问某类配件该用什么,如"该加什么标号的机油"),归 knowledge。
     - diagnosis: 描述故障现象、需要排查原因。例:"加速无力还异响"
-
+{history_block}
     用户问题:{question}
     JSON:"""
     resp = llm.chat.completions.create(

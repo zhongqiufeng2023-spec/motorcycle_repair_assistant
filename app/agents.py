@@ -50,8 +50,10 @@ class AgentState(TypedDict):
 def _generate(question: str, contexts: list[str], source: str = "维修手册") ->str:
     """给定问题和检索到的资料,生成最终回答"""
     context_text = "\n".join(f"- {c}" for c in contexts)
-    prompt = f"""你是Ninja 400的汽修助手。下面是从【{source}】中查到的资料，请严格根据下面的资料回答用户问题。
-如果资料中没有相关信息,就如实说"手册里没有查到相关信息",不要编造。
+    prompt = f"""你是摩托车维修保养助手。下面是从【{source}】中检索到的资料,可能混有其他车型的条目。
+    只依据与用户问题所指车型/主题相关的资料作答;无关车型的条目直接忽略,
+    不要向用户提及资料的来源构成或你的筛选过程,直接给出干净的答案。
+    如果资料中确实没有相关信息,就如实说"手册里没有查到相关信息",不要编造。
 
 【参考资料】
 {context_text}
@@ -115,7 +117,7 @@ def supervisor_node(state : AgentState) -> dict:
     faq = check_faq(q)
     if faq:
         return _final(faq,decision=RouteDecision(target="chitchat").model_dump(), route="FAQ")
-    d = decide_route(q)
+    d = decide_route(q, _history(state)[:-1])
     return {"decision": d.model_dump(), "route": f"{d.target}/{d.strategy or '-'}"}
 
 def qa_node(state: AgentState) -> dict:
@@ -150,9 +152,11 @@ def qa_node(state: AgentState) -> dict:
 def action_node(state: AgentState) -> dict:
     q = state["question"]
     messages = [
-        {"role": "system", "content": "你是摩托车店的业务办理助手。只能通过提供的工具办理业务,"
-            "工具没覆盖的业务如实说明办不了。工具返回失败时,向用户解释原因;"
-            "不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
+        {"role": "system", "content": "你是摩托车店的业务办理助手。只能通过提供的工具办理业务,工具没覆盖的业务如实说明办不了。"
+            "【关键机制】你无法直接用文字向用户提问或索取信息——唯一能向用户要信息的方式是调用 ask_user 工具。"
+            "因此只要办理业务缺少必要信息(如订单号、预约日期)且无法从对话历史推断,你必须调用 ask_user 工具,绝不能用文字去问用户。"
+            "只有在业务已办完、或确实办不了需要说明时,才用文字回复。"
+            "工具返回失败时,向用户解释原因;不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
     fail_count = 0
     denied_tools = set()
     for _ in range(5):
@@ -165,6 +169,14 @@ def action_node(state: AgentState) -> dict:
         messages.append(msg)
 
         for tc in msg.tool_calls:
+            if tc.function.name == "ask_user":
+                args = json.loads(tc.function.arguments)
+                user_reply = interrupt({"type": "clarify",
+                                        "question": args["question"],
+                                        "options": args.get("options")})
+                result = {"ok": True, "user_reply": user_reply}   # 用户的回答作为"工具结果"喂回
+                messages.append({"role": "tool", "tool_call_id": tc.id,"content": json.dumps(result, ensure_ascii=False)})
+                continue
             fn = TOOL_REGISTRY.get(tc.function.name)
             try:
                 args = json.loads(tc.function.arguments)

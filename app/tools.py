@@ -64,6 +64,20 @@ TOOLS_SCHEMA = [
             "required": ["order_id","reason"],
         },
     }},
+
+    {"type": "function", "function": {
+        "name": "ask_user",
+        "description": "当办理业务缺少必要信息(如订单号、预约日期)且无法从对话历史推断时,调用此工具向用户提问。不要用它闲聊,任何需要用户回话才能继续的情况(含确认猜测值)都必须走 ask_use。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "要问用户的话,一句话"},
+                "options": {"type": "array", "items": {"type": "string"},
+                            "description": "可选:给用户几个选项让他挑(如日期候选);没有就省略"},
+            },
+            "required": ["question"],
+        },
+    }}
    ]
 
 TOOL_REGISTRY = {"query_order": query_order, "book_service": book_service, "request_refund": request_refund}
