@@ -23,7 +23,8 @@ numpy==2.5.1
 neo4j==6.2.0
 
 # 语料入库(PDF 手册提取)
-pypdf==6.14.2
+pypdf==6.14.2               # 读书签大纲(outline)做章节感知切分
+pdfplumber==0.11.10         # 懂版面:extract_tables 抓有框线表格 + extract_text(x_tol)去字符粘连
 
 # 服务化(API 后端)
 fastapi==0.139.2
