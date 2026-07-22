@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { sendChat, resumeChat } from '../api/backend.js'
-import { getTicket } from '../api/mock.js'
+import { sendChat, resumeChat, getTicket } from '../api/backend.js'
 
 // 用户聊天窗:普通问答走 /chat;当后端返回 pending_clarification(缺信息追问)时,进入"等补充"状态,
 // 用户下一条走 /resume(绕过路由,直接送回等待的 interrupt)——根治裸回复("是"/"12345")被路由误判。
@@ -19,7 +18,7 @@ export default function ChatPage() {
 
   function pushMsg(m) { setMessages(prev => [...prev, m]) }
 
-  // 退款工单轮询回推(mock 阶段;退款工单化后改查 Spring Boot)
+  // 退款工单轮询回推:每 1.5s 查一次 Spring Boot(经 /api/tickets/{id}),状态一变就弹结果气泡并停轮询
   function watchTicket(ticketId) {
     if (polling.current.has(ticketId)) return
     polling.current.add(ticketId)
@@ -41,7 +40,7 @@ export default function ChatPage() {
       setClarify({ options: res.options || null })   // 进入"等补充"——下一条走 /resume
     } else {
       setClarify(null)
-      if (res.status === 'pending_approval' && res.ticketId) watchTicket(res.ticketId)
+      if (res.ticketId) watchTicket(res.ticketId)   // 开了退款工单 → 启动结果轮询(工单化后响应是 done+ticketId,不再 pending_approval)
     }
   }
 

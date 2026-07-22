@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { listTickets, decideTicket } from '../api/mock.js'
+import { listTickets, decideTicket } from '../api/backend.js'
 
 const STATUS_LABEL = { PENDING: '待审核', APPROVED: '已通过', REJECTED: '已驳回' }
 
@@ -36,7 +36,8 @@ export default function ConsolePage() {
             <div className="ticket-main">
               <div className="ticket-id">{t.id} <span className="tag warn">退款</span></div>
               <div className="ticket-field">订单号:{t.orderId}</div>
-              <div className="ticket-field">用户原话:{t.userQuestion}</div>
+              <div className="ticket-field">商品:{t.itemName}</div>
+              <div className="ticket-field">退款原因:{t.reason}</div>
               <div className="ticket-time">{new Date(t.createdAt).toLocaleString('zh-CN')}</div>
             </div>
             <div className="ticket-actions">

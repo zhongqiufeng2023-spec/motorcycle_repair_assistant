@@ -1,3 +1,8 @@
+import os, json, urllib.request, urllib.error
+
+# 业务系统(Spring Boot)地址;退款工单开在这里。可用环境变量覆盖。
+BUSINESS_API = os.getenv("BUSINESS_API_URL", "http://localhost:8080")
+
 # ==================== mock 数据(充当"业务数据库") ====================
 MOCK_ORDERS = {
     "12345": {"item": "NGK CPR8EA-9 火花塞", "status": "已签收", "days_since_delivery": 3},
@@ -24,7 +29,9 @@ def book_service(date: str, service_type:str) -> dict:
         
     return {"ok": False, "error": f"预约时间{date}不存在"}
 
-def request_refund(order_id: str, reason: str) -> dict:
+def request_refund(order_id: str, reason: str, session_id: str = None) -> dict:
+    """预检退款资格(政策仍在 LLM 视野内=省审批人注意力),通过则【开工单】,不再当场退款、不再 interrupt。
+    session_id 由 action_node 注入(记录发起会话,商家批复后好把结果推回这条对话)。"""
     order = MOCK_ORDERS.get(order_id)
     if order is None:
         return {"ok": False, "error": f"订单 {order_id} 不存在,请核对订单号"}
@@ -33,7 +40,18 @@ def request_refund(order_id: str, reason: str) -> dict:
         return {"ok": False, "error": f"订单 {order_id} 尚未签收,暂不能申请退款"}
     if days > 7:
         return {"ok": False, "error": f"订单 {order_id} 已签收 {days} 天,超出 7 天无理由退换期"}
-    return {"ok": True,"order": order, "reason": reason, "message": "退款将在 3-5 个工作日原路退回"}
+    # 预检通过 → 调业务系统开退款工单(PENDING),对话不挂起、立刻返回单号
+    try:
+        payload = json.dumps({"orderId": order_id, "sessionId": session_id or "",
+                              "reason": reason, "itemName": order["item"]}).encode("utf-8")
+        req = urllib.request.Request(f"{BUSINESS_API}/tickets", data=payload,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            ticket = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return {"ok": False, "error": f"工单系统暂时不可用,请稍后再试({e})"}
+    return {"ok": True, "ticket_id": ticket["id"],
+            "message": f"已为您提交退款工单(单号 {ticket['id']}),商家审核后会通知您,请勿重复提交"}
 
 TOOLS_SCHEMA = [
     {"type": "function", "function": {
@@ -81,7 +99,6 @@ TOOLS_SCHEMA = [
    ]
 
 TOOL_REGISTRY = {"query_order": query_order, "book_service": book_service, "request_refund": request_refund}
-HIGH_RISK_TOOLS = {"request_refund"}    
 
 if __name__ == "__main__":
     print(query_order("12345"))          # 成功

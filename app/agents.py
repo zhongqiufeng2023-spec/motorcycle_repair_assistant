@@ -10,7 +10,7 @@ from app.retriever import HybridRetriever
 from app.graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
 from langsmith.wrappers import wrap_openai
-from app.tools import TOOLS_SCHEMA, TOOL_REGISTRY, HIGH_RISK_TOOLS
+from app.tools import TOOLS_SCHEMA, TOOL_REGISTRY
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
@@ -46,6 +46,8 @@ class AgentState(TypedDict):
     cypher: Optional[str]           # 图检索溯源
     error: Optional[str]            # 失败详情(别吞错误,你上次的教训)
     sub_questions: Optional[list[str]]
+    session_id: Optional[str]            # 入口塞进来=thread_id;开退款工单时注入给 request_refund
+    ticket_id: Optional[int]             # 本轮开出的退款工单号;透传给前端做结果轮询回推
 
 def _generate(question: str, contexts: list[str], source: str = "维修手册") ->str:
     """给定问题和检索到的资料,生成最终回答"""
@@ -156,16 +158,19 @@ def action_node(state: AgentState) -> dict:
             "【关键机制】你无法直接用文字向用户提问或索取信息——唯一能向用户要信息的方式是调用 ask_user 工具。"
             "因此只要办理业务缺少必要信息(如订单号、预约日期)且无法从对话历史推断,你必须调用 ask_user 工具,绝不能用文字去问用户。"
             "只有在业务已办完、或确实办不了需要说明时,才用文字回复。"
-            "工具返回失败时,向用户解释原因;不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
+            "工具返回失败时(如超过退款期限、订单不存在),必须如实、明确地告诉用户失败的具体原因和结论"
+            "(例:'很抱歉,该订单已签收超过 7 天,超出无理由退款期,无法办理退款');"
+            "严禁声称任何没有真实发生的动作——不要说'已登记工单''已转人工''专人会联系您',除非工具确实返回了工单号或转接信息。"
+            "不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
     fail_count = 0
-    denied_tools = set()
+    opened_ticket_id = None                 # 本轮若开了退款工单,记下单号,终局带给前端
     for _ in range(5):
         resp = llm.chat.completions.create(
             model = "deepseek-chat",messages = messages, tools = TOOLS_SCHEMA, temperature = 0
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            return _final(msg.content)
+            return _final(msg.content, ticket_id=opened_ticket_id)
         messages.append(msg)
 
         for tc in msg.tool_calls:
@@ -182,27 +187,13 @@ def action_node(state: AgentState) -> dict:
                 args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
                 args, fn ={},None
-            if fn and tc.function.name in HIGH_RISK_TOOLS:
-                if tc.function.name in denied_tools:
-                    result = {"ok": False, "denied": True,"error": "该操作已被商家驳回,不可重复申请,请如实告知用户"}
-                else:
-                    approval = interrupt(
-                        {
-                            "type":"approval_request",
-                            "tool":tc.function.name,
-                            "args":args,
-                            "user_question":state["question"],
-                        }
-                    )
-                    if approval == "yes":
-                        result = fn(**args)
-                    else:
-                        denied_tools.add(tc.function.name)
-                        result = {"ok": False, "denied": True,"error": "商家审核未通过,退款申请已驳回,将由人工客服跟进处理"}
-            else:        
-                result = fn(**args) if fn else {"ok": False, "error": f"未知工具 {tc.function.name}"}
+            if tc.function.name == "request_refund":
+                args["session_id"] = state.get("session_id")   # 会话号不由 LLM 提供,节点注入(开工单记发起会话)
+            result = fn(**args) if fn else {"ok": False, "error": f"未知工具 {tc.function.name}"}
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
-            if not result.get("ok", True) and not result.get("denied"):
+            if tc.function.name == "request_refund" and result.get("ok") and result.get("ticket_id"):
+                opened_ticket_id = result["ticket_id"]   # 开单成功 → 记单号,前端据此轮询回推
+            if not result.get("ok", True):
                 fail_count += 1
                 if fail_count>=3:
                     return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。", error = f"连续失败{fail_count}次,已转人工" )

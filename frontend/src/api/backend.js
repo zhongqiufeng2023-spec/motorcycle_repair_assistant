@@ -16,7 +16,7 @@ async function post(path, body) {
 
 // 归一化 FastAPI ChatResponse( { status, answer, question, options, approval_request } )
 function norm(d) {
-  return { status: d.status, answer: d.answer, question: d.question, options: d.options, ticketId: undefined }
+  return { status: d.status, answer: d.answer, question: d.question, options: d.options, ticketId: d.ticket_id }
 }
 
 // 用户提问(对应 FastAPI /chat)
@@ -29,4 +29,30 @@ export async function sendChat(sessionId, question) {
 // 所以"是""12345"这类裸回复不会被路由误判。
 export async function resumeChat(sessionId, value) {
   return norm(await post('/api/resume', { session_id: sessionId, value }))
+}
+
+// ---- 工单(对应 Spring Boot 业务系统,经 vite 代理 /api/tickets → :8080)----
+
+// 工单列表(商家台);后端已按 createdAt 倒序返回,无需再 reverse
+export async function listTickets() {
+  const res = await fetch('/api/tickets')
+  if (!res.ok) throw new Error(`/api/tickets 返回 ${res.status}`)
+  return res.json()
+}
+
+// 裁决工单(通过/驳回);签名与 mock 对齐,返回 { ok, ticket } 或 { ok:false, error }
+export async function decideTicket(id, decision, note = '') {
+  const res = await fetch(`/api/tickets/${id}/decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision, note }),
+  })
+  const data = await res.json()
+  return res.ok ? { ok: true, ticket: data } : { ok: false, error: data.error }
+}
+
+// 单张工单(用户端轮询结果回推用)
+export async function getTicket(id) {
+  const res = await fetch(`/api/tickets/${id}`)
+  return res.ok ? res.json() : null
 }
