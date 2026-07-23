@@ -10,7 +10,7 @@ from app.retriever import HybridRetriever
 from app.graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
 from langsmith.wrappers import wrap_openai
-from app.tools import TOOLS_SCHEMA, TOOL_REGISTRY
+from app import mcp_client
 from langgraph.types import interrupt, Command
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.message import add_messages
@@ -151,6 +151,28 @@ def qa_node(state: AgentState) -> dict:
     return _final(_generate(q, all_contexts), contexts = all_contexts, sub_questions = sub_questions)
 
 
+# ask_user 不是业务工具,是"LLM 想问真人"的本地信号:无函数体,action_node 拦下来触发 interrupt。
+# 它不能进 MCP(远程服务 pause 不了本进程的 graph、也够不着终端用户),所以 schema 留在 agent 侧。
+ASK_USER_SCHEMA = {"type": "function", "function": {
+    "name": "ask_user",
+    "description": "当办理业务缺少必要信息(如订单号、预约日期)且无法从对话历史推断时,调用此工具向用户提问。不要用它闲聊,任何需要用户回话才能继续的情况(含确认猜测值)都必须走 ask_user。",
+    "parameters": {"type": "object", "properties": {
+        "question": {"type": "string", "description": "要问用户的话,一句话"},
+        "options": {"type": "array", "items": {"type": "string"},
+                    "description": "可选:给用户几个选项让他挑(如日期候选);没有就省略"},
+    }, "required": ["question"]},
+}}
+
+# 工具清单 = MCP 动态发现的业务工具(tools/list) + 本地 ask_user。懒加载缓存:首个业务请求才连
+# :9000 发现一次(agent 进程 import 不依赖工具服务在),之后复用。
+_tool_schemas_cache = None
+def _tool_schemas() -> list:
+    global _tool_schemas_cache
+    if _tool_schemas_cache is None:
+        _tool_schemas_cache = mcp_client.get_tool_schemas() + [ASK_USER_SCHEMA]
+    return _tool_schemas_cache
+
+
 def action_node(state: AgentState) -> dict:
     q = state["question"]
     messages = [
@@ -166,7 +188,7 @@ def action_node(state: AgentState) -> dict:
     opened_ticket_id = None                 # 本轮若开了退款工单,记下单号,终局带给前端
     for _ in range(5):
         resp = llm.chat.completions.create(
-            model = "deepseek-chat",messages = messages, tools = TOOLS_SCHEMA, temperature = 0
+            model = "deepseek-chat",messages = messages, tools = _tool_schemas(), temperature = 0
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
@@ -182,14 +204,13 @@ def action_node(state: AgentState) -> dict:
                 result = {"ok": True, "user_reply": user_reply}   # 用户的回答作为"工具结果"喂回
                 messages.append({"role": "tool", "tool_call_id": tc.id,"content": json.dumps(result, ensure_ascii=False)})
                 continue
-            fn = TOOL_REGISTRY.get(tc.function.name)
             try:
                 args = json.loads(tc.function.arguments)
             except json.JSONDecodeError:
-                args, fn ={},None
+                args = {}
             if tc.function.name == "request_refund":
-                args["session_id"] = state.get("session_id")   # 会话号不由 LLM 提供,节点注入(开工单记发起会话)
-            result = fn(**args) if fn else {"ok": False, "error": f"未知工具 {tc.function.name}"}
+                args["session_id"] = state.get("session_id")   # 会话号不由 LLM 提供,节点注入,经 MCP 透传到工具服务
+            result = mcp_client.call(tc.function.name, args)    # 远程执行:tools/call → :9000 工具服务(桥接见 app/mcp_client)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
             if tc.function.name == "request_refund" and result.get("ok") and result.get("ticket_id"):
                 opened_ticket_id = result["ticket_id"]   # 开单成功 → 记单号,前端据此轮询回推

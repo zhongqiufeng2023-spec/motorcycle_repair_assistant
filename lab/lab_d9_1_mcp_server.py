@@ -1,3 +1,7 @@
+# ⚠️ 历史学习记录(D9,stdio MCP 初见),已不可运行、仅作参考。
+# 生产版已升级并迁出:MCP 服务器 → tool-service/server.py(HTTP 常驻 :9000)、
+# 客户端 → app/mcp_client.py(async→sync 桥)。下面 `from app import tools` 引用的是
+# 迁移前的 app/tools.py —— 该文件已在 MCP 化收口时删除,故本 lab 现在跑会 ImportError。
 import os, sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastmcp import FastMCP
