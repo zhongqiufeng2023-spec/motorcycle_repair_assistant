@@ -152,9 +152,17 @@
   - 修法:认证 + 角色授权(商家角色才能调 /approve),用户端/商家端两个受众分离;审批操作留审计日志。
   - 什么时候回来:D12 工程化或二期(Spring Boot 网关做鉴权是自然位置)。
 
-- [ ] **MemorySaver 换持久化 checkpointer**
-  - 是什么:当前 checkpoint 在 uvicorn 进程内存里,重启服务=所有会话(含挂起中的审批)蒸发。
-  - 什么时候回来:D12 工程化/二期(SqliteSaver 或 RedisSaver,顺带解决多实例部署的会话共享)。
+- [ ] **MemorySaver 换持久化 checkpointer(Redis 在本项目最该用在这)**
+  - 是什么:当前 checkpoint 在 uvicorn 进程内存里,重启服务=所有会话(含挂起中的澄清)蒸发。
+  - 为什么优先级上来了:二期起了多进程(FastAPI + Spring Boot),真多实例部署时会话状态要跨实例共享,内存 checkpoint 各进程一份不共享。
+  - 方案:PostgresSaver(已有 Postgres,一库多用)或 RedisSaver;顺带解决多实例会话共享 + 重启不丢挂起。
+  - **面试锚点**:Redis 在本项目的正确用武之地是这个(持久化/共享会话),**不是"FAQ 缓存"**——FAQ 只十几条,内存 numpy 匹配本身就是缓存角色,再上 Redis 是过度设计。知道工具边界 > 堆技术栈。
+  - 什么时候回来:二期做用户系统/多实例部署时。
+
+- [ ] **FAQ 存储升级(Redis 缓存 / 挪进向量库)—— 目前刻意不做**
+  - 现状:FAQ = 内存字典(十几条)+ BGE-M3 numpy 余弦匹配,`_faq_vectors` 模块加载时算好、常驻内存。既不是 Redis,也不是 Chroma(Chroma 存手册 RAG 语料,与 FAQ 两回事)。
+  - 为什么不做:十几条数据内存算余弦几毫秒,内存字典本身就等于缓存。区分标准:少量临时→numpy,大量持久→向量库。
+  - 什么时候回来:①FAQ 涨到成百上千条或要 TTL 过期 → 挪进向量库/Redis;②多实例部署需共享 FAQ 缓存 → Redis。当前单实例十几条,YAGNI。
 
 - [ ] **拆出 `models.py` / `schemas.py`**
   - 是什么:把 Pydantic 模型(目前只有 `RouteDecision`)集中到独立文件。

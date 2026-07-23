@@ -1,7 +1,7 @@
 // ============================================================
 // 真后端层 —— 调 FastAPI Agent 服务。
 // 前端 fetch('/api/...'),由 vite dev 代理转发到 http://localhost:8000(见 vite.config.js),
-// 浏览器视角同源、无需 CORS。函数签名与 mock.js 对齐 → 页面组件换 import 即可切换。
+// 浏览器视角同源、无需 CORS。/api/chat /api/resume 走 FastAPI(:8000),/api/tickets 走 Spring Boot(:8080)。
 // ============================================================
 
 async function post(path, body) {

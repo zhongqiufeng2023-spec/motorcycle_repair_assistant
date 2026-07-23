@@ -15,7 +15,7 @@ export default function App() {
           <button className={tab === 'user' ? 'active' : ''} onClick={() => setTab('user')}>用户端</button>
           <button className={tab === 'merchant' ? 'active' : ''} onClick={() => setTab('merchant')}>商家端</button>
         </nav>
-        <div className="env-tag">chat: FastAPI · 工单: mock</div>
+        <div className="env-tag">chat: FastAPI · 工单: Spring Boot</div>
       </header>
       <main className="content">
         <div className="pane" style={{ display: tab === 'user' ? 'flex' : 'none' }}><ChatPage /></div>
