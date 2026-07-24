@@ -47,6 +47,7 @@ class AgentState(TypedDict):
     error: Optional[str]            # 失败详情(别吞错误,你上次的教训)
     sub_questions: Optional[list[str]]
     session_id: Optional[str]            # 入口塞进来=thread_id;开退款工单时注入给 request_refund
+    user_id: Optional[str]               # 登录用户 id(FastAPI 验 JWT 后注入);开工单绑到谁、谁能查
     ticket_id: Optional[int]             # 本轮开出的退款工单号;透传给前端做结果轮询回推
 
 def _generate(question: str, contexts: list[str], source: str = "维修手册") ->str:
@@ -210,6 +211,7 @@ def action_node(state: AgentState) -> dict:
                 args = {}
             if tc.function.name == "request_refund":
                 args["session_id"] = state.get("session_id")   # 会话号不由 LLM 提供,节点注入,经 MCP 透传到工具服务
+                args["user_id"] = state.get("user_id")         # 登录用户 id 同样节点注入、对 LLM 隐藏,经 MCP 透传绑到工单
             result = mcp_client.call(tc.function.name, args)    # 远程执行:tools/call → :9000 工具服务(桥接见 app/mcp_client)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
             if tc.function.name == "request_refund" and result.get("ok") and result.get("ticket_id"):

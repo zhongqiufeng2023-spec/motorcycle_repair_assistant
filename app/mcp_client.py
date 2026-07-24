@@ -12,7 +12,7 @@ from fastmcp import Client
 MCP_URL = os.getenv("MCP_URL", "http://127.0.0.1:9000/mcp")
 
 # 系统注入、不该进 LLM 视野的参数:发给 LLM 的 schema 里剥掉,由 action_node 在 call() 前注入。
-_SYSTEM_PARAMS = {"session_id"}
+_SYSTEM_PARAMS = {"session_id", "user_id"}
 
 
 async def _alist():

@@ -48,10 +48,10 @@ def book_service(date: str, service_type: str) -> dict:
     return {"ok": False, "error": f"{date} 已约满,可约日期:{dates}"}
 
 
-def request_refund(order_id: str, reason: str, session_id: str = None) -> dict:
+def request_refund(order_id: str, reason: str, session_id: str = None, user_id: str = None) -> dict:
     """预检退款资格(政策仍在 LLM 视野内=省审批人注意力),通过则【开工单】,不再当场退款、不再 interrupt。
-    session_id 用于记录发起会话(商家批复后好把结果推回这条对话)。
-    ⚠️ MCP 化后 session_id 怎么穿过来是第 2 步要解的接缝(见 server.py 备注)。"""
+    session_id 记录发起会话(商家批复后把结果推回这条对话);user_id 记录归属用户(谁的退款、谁能查)。
+    两者都由 agent 侧注入、经 MCP 透传到这里。"""
     ok, code, order = _biz_get(f"/orders/{order_id}")
     if not ok:
         if code == 404:
@@ -64,7 +64,7 @@ def request_refund(order_id: str, reason: str, session_id: str = None) -> dict:
         return {"ok": False, "error": f"订单 {order_id} 已签收 {days} 天,超出 7 天无理由退换期"}
     # 预检通过 → 调业务系统开退款工单(PENDING),对话不挂起、立刻返回单号
     try:
-        payload = json.dumps({"orderId": order_id, "sessionId": session_id or "",
+        payload = json.dumps({"orderId": order_id, "sessionId": session_id or "", "userId": user_id or "",
                               "reason": reason, "itemName": order["itemName"]}).encode("utf-8")
         req = urllib.request.Request(f"{BUSINESS_API}/tickets", data=payload,
                                      headers={"Content-Type": "application/json"}, method="POST")

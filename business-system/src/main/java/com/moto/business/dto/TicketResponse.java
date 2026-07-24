@@ -12,6 +12,7 @@ public record TicketResponse(
         Long id,
         String orderId,
         String sessionId,
+        String userId,
         String reason,
         String itemName,
         RefundStatus status,
@@ -22,7 +23,7 @@ public record TicketResponse(
     /** 实体 → 响应 DTO 的映射。跨包调用,故 public。 */
     public static TicketResponse from(RefundTicket t) {
         return new TicketResponse(
-                t.getId(), t.getOrderId(), t.getSessionId(), t.getReason(),
+                t.getId(), t.getOrderId(), t.getSessionId(), t.getUserId(), t.getReason(),
                 t.getItemName(), t.getStatus(), t.getDecisionNote(),
                 t.getCreatedAt(), t.getUpdatedAt());
     }

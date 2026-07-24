@@ -4,6 +4,7 @@ package com.moto.business.dto;
 public record OpenTicketRequest(
         String orderId,
         String sessionId,
+        String userId,
         String reason,
         String itemName
 ) {}

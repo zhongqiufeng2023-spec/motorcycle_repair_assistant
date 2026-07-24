@@ -16,7 +16,8 @@ public class RefundTicket {
     private Long id;
 
     private String orderId;      // 要退款的订单号
-    private String sessionId;    // 发起会话(未来接 user 系统再补 userId)
+    private String sessionId;    // 发起会话(推回哪段对话)
+    private String userId;       // 发起用户(JWT subject);谁的退款、谁能查。历史工单可能为空
 
     @Column(length = 500)
     private String reason;       // 退款原因(用户话术)
@@ -49,6 +50,9 @@ public class RefundTicket {
 
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
 
     public String getReason() { return reason; }
     public void setReason(String reason) { this.reason = reason; }

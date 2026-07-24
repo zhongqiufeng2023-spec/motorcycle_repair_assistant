@@ -1,58 +1,68 @@
 // ============================================================
-// 真后端层 —— 调 FastAPI Agent 服务。
-// 前端 fetch('/api/...'),由 vite dev 代理转发到 http://localhost:8000(见 vite.config.js),
-// 浏览器视角同源、无需 CORS。/api/chat /api/resume 走 FastAPI(:8000),/api/tickets 走 Spring Boot(:8080)。
+// 真后端层 —— 调 FastAPI Agent(:8000)与 Spring Boot 业务系统(:8080)。
+// 受保护请求带 Authorization: Bearer <JWT>(登录后从 localStorage 取)。
+// 401=登录失效:清 token + 派发 auth-expired 事件,App 据此回登录页。
+// vite 代理:/api/auth /api/tickets → :8080(Spring Boot),其余 /api/* → :8000(FastAPI)。
 // ============================================================
+import { getToken, clearAuth } from '../auth.js'
 
-async function post(path, body) {
-  const res = await fetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' }
+  const t = getToken()
+  if (t) h.Authorization = `Bearer ${t}`
+  return h
+}
+
+// 401 统一处理:令牌无效/过期 → 登出回登录页
+function guard(res) {
+  if (res.status === 401) {
+    clearAuth()
+    window.dispatchEvent(new Event('auth-expired'))
+    throw new Error('登录已失效,请重新登录')
+  }
+  return res
+}
+
+async function postAuthed(path, body) {
+  const res = guard(await fetch(path, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) }))
   if (!res.ok) throw new Error(`${path} 返回 ${res.status}`)
   return res.json()
 }
 
-// 归一化 FastAPI ChatResponse( { status, answer, question, options, approval_request } )
+// ---- 认证(Spring Boot /auth/**;登录/注册本身不带 token)----
+async function postAuth(path, body) {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `请求失败(${res.status})`)
+  return data   // {token, username, role}
+}
+export const login = (username, password) => postAuth('/api/auth/login', { username, password })
+export const register = (username, password) => postAuth('/api/auth/register', { username, password })
+
+// ---- 对话(FastAPI /chat /resume)----
 function norm(d) {
   return { status: d.status, answer: d.answer, question: d.question, options: d.options, ticketId: d.ticket_id }
 }
-
-// 用户提问(对应 FastAPI /chat)
 export async function sendChat(sessionId, question) {
-  return norm(await post('/api/chat', { session_id: sessionId, question }))
+  return norm(await postAuthed('/api/chat', { session_id: sessionId, question }))
 }
-
-// 对挂起点的回答(对应 FastAPI /resume):澄清补充信息走这里。
-// 关键:走 /resume → Command(resume) → 直接送回等待的 interrupt(),不经过路由——
-// 所以"是""12345"这类裸回复不会被路由误判。
 export async function resumeChat(sessionId, value) {
-  return norm(await post('/api/resume', { session_id: sessionId, value }))
+  return norm(await postAuthed('/api/resume', { session_id: sessionId, value }))
 }
 
-// ---- 工单(对应 Spring Boot 业务系统,经 vite 代理 /api/tickets → :8080)----
-
-// 工单列表(商家台);后端已按 createdAt 倒序返回,无需再 reverse
+// ---- 工单(Spring Boot /tickets)----
 export async function listTickets() {
-  const res = await fetch('/api/tickets')
+  const res = guard(await fetch('/api/tickets', { headers: authHeaders() }))
   if (!res.ok) throw new Error(`/api/tickets 返回 ${res.status}`)
   return res.json()
 }
-
-// 裁决工单(通过/驳回);签名与 mock 对齐,返回 { ok, ticket } 或 { ok:false, error }
 export async function decideTicket(id, decision, note = '') {
-  const res = await fetch(`/api/tickets/${id}/decide`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision, note }),
-  })
-  const data = await res.json()
+  const res = guard(await fetch(`/api/tickets/${id}/decide`, {
+    method: 'POST', headers: authHeaders(), body: JSON.stringify({ decision, note }) }))
+  const data = await res.json().catch(() => ({}))
   return res.ok ? { ok: true, ticket: data } : { ok: false, error: data.error }
 }
-
-// 单张工单(用户端轮询结果回推用)
 export async function getTicket(id) {
-  const res = await fetch(`/api/tickets/${id}`)
+  const res = guard(await fetch(`/api/tickets/${id}`, { headers: authHeaders() }))
   return res.ok ? res.json() : null
 }

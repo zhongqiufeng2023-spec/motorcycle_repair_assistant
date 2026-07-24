@@ -37,13 +37,14 @@ def book_service(
 def request_refund(
     order_id: Annotated[str, Field(description="订单号,纯数字字符串")],
     reason: Annotated[str, Field(description="退款原因")],
-    session_id: str = "",   # 系统注入,非 LLM 填写;客户端发给 LLM 前会剥掉此参数(见 app/mcp_client._SYSTEM_PARAMS)
+    session_id: str = "",   # 系统注入,非 LLM 填写;客户端发给 LLM 前会剥掉(见 app/mcp_client._SYSTEM_PARAMS)
+    user_id: str = "",      # 同上:登录用户 id,对 LLM 隐藏、经 MCP 透传,退款工单绑到这个用户
 ) -> dict:
     """如果用户的话里已经包含退款原因(哪怕口语化,如不想要了买错了),直接采用,不要重复询问。
     为订单申请退款。仅支持已签收且签收不超过 7 天的订单;需订单号和退款原因。"""
-    # 接缝已解:session_id 由 agent 侧注入、经 MCP 透传到这里 —— 退款开工单时记录发起会话,
-    # 商家批复后好把结果推回那条对话。它 optional/默认空,故不进 required、也会被客户端从 LLM 视野剥掉。
-    return tools.request_refund(order_id, reason, session_id or None)
+    # session_id / user_id 都由 agent 侧注入、经 MCP 透传到这里:开工单时记录发起会话 + 归属用户。
+    # 两者 optional/默认空,故不进 required、也会被客户端从 LLM 视野剥掉。
+    return tools.request_refund(order_id, reason, session_id or None, user_id or None)
 
 
 if __name__ == "__main__":

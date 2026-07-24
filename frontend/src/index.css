@@ -81,3 +81,28 @@ body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", "Microsoft 
 .btn.approve { background: var(--ok); }
 .btn.reject { background: var(--bad); }
 .btn:disabled { opacity: .5; cursor: default; }
+
+/* ---- 顶栏用户区 ---- */
+.user-box { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.role-tag { font-size: 12px; color: var(--brand); border: 1px solid var(--brand); padding: 2px 8px; border-radius: 6px; }
+.username { font-size: 14px; color: var(--muted); }
+.logout-btn { padding: 5px 12px; border: 1px solid var(--border); background: transparent;
+  color: var(--text); border-radius: 8px; cursor: pointer; font-size: 13px; }
+.logout-btn:hover { border-color: var(--bad); color: var(--bad); }
+
+/* ---- 登录 / 注册页 ---- */
+.auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.auth-card { width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 16px; padding: 28px 24px; display: flex; flex-direction: column; gap: 12px; }
+.auth-brand { font-weight: 700; font-size: 18px; text-align: center; }
+.auth-title { font-size: 15px; color: var(--muted); text-align: center; margin-bottom: 4px; }
+.auth-card input { padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); color: var(--text); font-size: 14px; }
+.auth-card button { padding: 11px; border: none; background: var(--brand); color: #fff;
+  border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; }
+.auth-card button:disabled { opacity: .5; cursor: default; }
+.auth-err { color: var(--bad); font-size: 13px; text-align: center; }
+.auth-switch { font-size: 13px; color: var(--muted); text-align: center; }
+.auth-switch a { color: var(--brand); cursor: pointer; }
+.auth-hint { font-size: 11px; color: var(--muted); text-align: center; margin-top: 4px;
+  border-top: 1px dashed var(--border); padding-top: 10px; }

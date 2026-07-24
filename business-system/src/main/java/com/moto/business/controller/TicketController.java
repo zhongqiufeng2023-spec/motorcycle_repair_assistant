@@ -23,7 +23,7 @@ public class TicketController {
     @PostMapping
     public TicketResponse open(@RequestBody OpenTicketRequest req) {
         return TicketResponse.from(
-                service.open(req.orderId(), req.sessionId(), req.reason(), req.itemName()));
+                service.open(req.orderId(), req.sessionId(), req.userId(), req.reason(), req.itemName()));
     }
 
     /** 列表(商家台):GET /tickets 或 GET /tickets?status=PENDING */

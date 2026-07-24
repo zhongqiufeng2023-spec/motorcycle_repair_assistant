@@ -7,7 +7,7 @@ import java.util.List;
 /** 退款工单业务接口。实现见 service/impl/TicketServiceImpl。 */
 public interface TicketService {
 
-    RefundTicket open(String orderId, String sessionId, String reason, String itemName);
+    RefundTicket open(String orderId, String sessionId, String userId, String reason, String itemName);
 
     List<RefundTicket> list(RefundStatus status);
 

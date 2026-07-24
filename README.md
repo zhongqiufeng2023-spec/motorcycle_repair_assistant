@@ -172,16 +172,21 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 真实语料入库:6 本车主手册 PDF → 逐页提取 + 定长/重叠切块 + 来源前缀 → 1093 块 + 8 内置片段(`lab/lab_d10_1_ingest.py` + `lab/lab_d10_2_build_corpus_db.py`)
 - 评估体系:43 条评估集(13 维度)+ 评估脚本,产出路由/命中/延迟/审批指标(`data/eval_set.json` + `lab/lab_d10_3_eval.py`,详见下方「评估结果」)
 
+**二期(生产化)**
+
+- 退款工单化:审批脱离对话线程 —— `request_refund` 开工单(PENDING)而非 interrupt 挂起,对话立刻结束;商家控制台批复后业务系统**无 LLM 确定性执行**,结果轮询回推对话(一次性解决"审批寄生对话线程"引发的僵尸复活 / 商家批复蒸发 / 锁会话 / 端点裸奔四坑)
+- Spring Boot 业务系统:订单 / 槽位 / 退款工单入 Postgres,业务规则唯一权威;Service 接口化 + DataSeeder 幂等种子(`business-system/`)
+- React 前端:用户聊天窗(含澄清追问 + 工单结果回推)+ 商家审批控制台(`frontend/`)
+- MCP 生产化:工具拆成独立进程(`tool-service/`,HTTP :9000),ActionAgent 经 `app/mcp_client.py`(async→sync 桥)动态发现 + 远程调用;系统参数(session_id)对 LLM 隐藏但穿透到底
+
 ### 🚧 进行中 / 📋 计划中
 
-- 📋 审批工单化:审批脱离对话线程,独立工单 + 状态机 + 结果回推(彻底解决长时审批与对话并行)
-- 📋 用户系统 + 持久化:user_id 鉴权、持久 checkpointer(重启不丢会话)、跨会话长期记忆
-- 📋 MCP 接入主流水线:ActionAgent 经 MCP 客户端动态加载工具(当前为本地注册表)
-- 📋 Redis:FAQ 缓存持久化(当前为进程内语义缓存)
-- 📋 FastAPI 流式响应(SSE)
+- 🚧 用户系统 + 鉴权:登录注册、user_id 身份、角色授权(用户 / 商家),工单绑定 user_id,商家端点鉴权
+- 📋 持久化 checkpointer:MemorySaver → Postgres/Redis(重启不丢会话 + 多实例共享);跨会话长期记忆(按 user_id)
+- 📋 结果回推升级:轮询 → WebSocket/SSE(实时,免刷新丢 watch)
+- 📋 业务规则彻底下沉:7 天退款期校验从 Python 预检下沉 Spring Boot(唯一权威复验)
 - 📋 本地模型:Ollama + Qwen2.5-7B,云端 / 本地双后端切换
-- 📋 前端:用户聊天窗 + 商家审批控制台
-- 📋 Docker / docker-compose:一键部署全套服务
+- 📋 Docker / docker-compose:一键编排全套服务
 - 📋 LLM-as-judge:答案质量自动评分(当前命中率用要点匹配)
 
 ## 评估结果
@@ -203,13 +208,19 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 
 ```
 .
-├── app/
-│   ├── api.py               # FastAPI 服务:/chat 对话 + /approve 商家审批(session_id=thread_id)
+├── app/                     # Agent 服务(FastAPI + LangGraph)
+│   ├── api.py               # FastAPI:/chat 对话 + /resume 澄清恢复(session_id=thread_id;退款已工单化,无 /approve)
 │   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成 + HITL + 多轮记忆)
-│   ├── tools.py             # 业务工具层:mock 工具 + JSON Schema + 高危名单(框架无关)
+│   ├── mcp_client.py        # MCP 客户端:async fastmcp Client 桥成同步接口 + schema 转换 + 剥系统参数
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
 │   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解
 │   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
+├── tool-service/            # MCP 工具服务(独立进程,HTTP :9000)
+│   ├── server.py            # @mcp.tool 薄壳 + HTTP 传输(工具经 MCP 暴露)
+│   └── tools.py             # 业务实现层:查订单/预约/退款,经 HTTP 调 Spring Boot
+├── business-system/         # 业务系统(Spring Boot + JPA + Postgres):订单/槽位/退款工单 + 状态机
+│   └── src/main/java/com/moto/business/   # entity / repository / service(+impl) / controller / dto
+├── frontend/                # React 前端(Vite):用户聊天窗 ChatPage + 商家控制台 ConsolePage
 ├── data/
 │   ├── moto_manual.py            # 内置保养知识片段(8 条,兜底语料)
 │   ├── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
@@ -236,8 +247,12 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 
 ## 快速开始
 
+二期后系统是**多进程架构**:前端(Vite)+ Agent 服务(FastAPI)+ 工具服务(MCP)+ 业务系统(Spring Boot)+ 两个数据库(Postgres 业务数据 / Neo4j 配件图谱)。下面分「一次性准备」与「按依赖顺序启动各服务」两步。
+
+### 一次性准备
+
 ```bash
-# 1. 克隆 + 虚拟环境 + 依赖
+# 1. 克隆 + 虚拟环境 + 依赖(Python 侧)
 git clone https://github.com/zhongqiufeng2023-spec/motorcycle_repair_assistant.git
 cd motorcycle_repair_assistant
 python -m venv .venv
@@ -248,29 +263,53 @@ pip install -r requirements.txt
 cp .env.example .env
 
 # 3. 构建向量库(向量库与手册衍生语料均不入库,须本地构建;首次会下载 BGE-M3 模型)
-#    3a. 把车主手册 PDF 放进 data/raw_manuals/(版权物,自备)
+#    先把车主手册 PDF 放进 data/raw_manuals/(版权物,自备)
 python lab/lab_d10_1_ingest.py           # 切片:PDF → data/manual_chunks.json
 python lab/lab_d10_2_build_corpus_db.py  # 向量化:切片 + 内置 DOCS → Chroma 向量库
+```
 
-# 4. 启动 Neo4j 图数据库(Docker)并导入配件兼容数据
+### 启动各服务(按依赖顺序)
+
+```bash
+# ① Postgres —— 业务数据(订单/槽位/退款工单)的唯一权威库
+docker run -d --name moto-postgres -p 5433:5432 \
+  -e POSTGRES_USER=moto -e POSTGRES_PASSWORD=moto -e POSTGRES_DB=moto postgres:16
+#   (已建过容器则 docker start moto-postgres)
+
+# ② Neo4j —— 配件兼容图谱,并导入数据
 docker run -d --name moto-neo4j -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/your_neo4j_password_here neo4j:5
 python lab/lab_d5_2_import_csv.py
 
-# 5. 启动 API 服务,浏览器开 http://localhost:8000/docs 交互
+# ③ Spring Boot 业务系统(:8080)—— 订单/槽位查询 + 退款工单状态机(业务规则唯一权威)
+#    需 JAVA_HOME 指向 JDK 17;首次可用 mvn 打包,之后跑 jar
+cd business-system && java -jar target/business-system-0.0.1.jar   # 或 mvn spring-boot:run
+cd ..
+
+# ④ MCP 工具服务(:9000)—— 业务工具经 MCP 独立进程暴露,Agent 远程发现+调用
+python tool-service/server.py
+
+# ⑤ FastAPI Agent 服务(:8000)—— 对话/路由/检索;经 MCP 调工具、经 HTTP 调业务系统
 uvicorn app.api:app --port 8000
-#   /chat   对话(普通问答 / 业务办理;高危操作返回 pending_approval)
-#   /approve 商家审批(同一 session_id 恢复挂起的高危操作)
+#   /chat    对话(普通问答 / 业务办理;退款开工单并返 ticket_id)
+#   /resume  澄清追问的补充回答(Command(resume) 送回挂起的 interrupt)
 
-# (可选)命令行跑完整多 Agent 流水线演示 / 单独测图检索
-python app/agents.py
-python app/graph_retriever.py
-
-# (可选)跑评估集,产出路由准确率 / 命中率 / 延迟等指标
-python lab/lab_d10_3_eval.py
+# ⑥ 前端(:5173)—— 用户聊天窗 + 商家审批控制台(Vite 代理 /api → :8000 与 :8080)
+cd frontend && npm install && npm run dev
 ```
 
-> **不入版本控制、需本地重建的**:向量库 `data/chroma_db/`、手册 PDF `data/raw_manuals/`、切片 `data/manual_chunks.json`、Neo4j 数据。手册是版权物,请自备 PDF 后跑第 3 步;缺语料时程序会明确提示先构建。
+浏览器开 http://localhost:5173 用页面,或开 http://localhost:8000/docs 直接调 API。
+
+```bash
+# (可选)命令行跑完整多 Agent 流水线演示 / 单独测图检索 / 跑评估集
+python app/agents.py            # 需 tool-service:9000 + Spring Boot:8080 在跑
+python app/graph_retriever.py
+python lab/lab_d10_3_eval.py    # 产出路由准确率 / 命中率 / 延迟等指标
+```
+
+> **不入版本控制、需本地重建的**:向量库 `data/chroma_db/`、手册 PDF `data/raw_manuals/`、切片 `data/manual_chunks.json`、Neo4j 数据、Postgres 数据(Spring Boot 启动时 `DataSeeder` 会自动灌订单/槽位种子)。手册是版权物,请自备 PDF 后跑准备第 3 步;缺语料时程序会明确提示先构建。
+>
+> **启动契约**:`③④` 必须先于向 Agent 发业务请求——action 路由会经 MCP(:9000)调工具、工具再经 HTTP 调 Spring Boot(:8080),缺一环则业务办理失败(FastAPI 本身可先起,工具清单首个业务请求时才懒加载)。
 
 ## 学习日志
 

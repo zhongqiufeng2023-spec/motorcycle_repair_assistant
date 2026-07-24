@@ -21,10 +21,11 @@ public class TicketServiceImpl implements TicketService {
     /** 开单:agent 的 request_refund 工具调这里,取代原 interrupt。落库即 PENDING。 */
     @Override
     @Transactional
-    public RefundTicket open(String orderId, String sessionId, String reason, String itemName) {
+    public RefundTicket open(String orderId, String sessionId, String userId, String reason, String itemName) {
         RefundTicket t = new RefundTicket();
         t.setOrderId(orderId);
         t.setSessionId(sessionId);
+        t.setUserId(userId);
         t.setReason(reason);
         t.setItemName(itemName);
         t.setStatus(RefundStatus.PENDING);

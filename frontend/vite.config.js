@@ -7,7 +7,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // 更具体的先匹配:工单走 Spring Boot(:8080,将来);其余 /api/* 走 FastAPI(:8000,/chat /resume)
+      // 更具体的先匹配:认证 + 工单走 Spring Boot(:8080);其余 /api/* 走 FastAPI(:8000,/chat /resume)
+      '/api/auth': { target: 'http://localhost:8080', changeOrigin: true, rewrite: p => p.replace(/^\/api/, '') },
       '/api/tickets': { target: 'http://localhost:8080', changeOrigin: true, rewrite: p => p.replace(/^\/api/, '') },
       '/api': { target: 'http://localhost:8000', changeOrigin: true, rewrite: p => p.replace(/^\/api/, '') },
     },

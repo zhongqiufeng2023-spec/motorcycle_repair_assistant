@@ -10,9 +10,15 @@ spring:
     password: ${POSTGRES_PASSWORD:moto}
   jpa:
     hibernate:
-      ddl-auto: update            # 开发期:按实体自动建/改表(refund_tickets)。生产应换 Flyway/Liquibase 迁移
+      ddl-auto: update            # 开发期:按实体自动建/改表(refund_tickets / users)。生产应换 Flyway/Liquibase 迁移
     show-sql: true
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
+
+# JWT 鉴权。secret 必须 ≥ 32 字节(HS256);FastAPI 用同一把 secret 验令牌(共享密钥,非共享 session)。
+# 生产用环境变量覆盖,别用这个默认值。
+jwt:
+  secret: ${JWT_SECRET:moto-dev-jwt-secret-change-me-please-0123456789abcdef}
+  expiration-ms: ${JWT_EXPIRATION_MS:86400000}   # 24 小时
