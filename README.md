@@ -6,15 +6,15 @@
                               ┌─────────────── 检索/知识 ───────────────┐
 用户 ──HTTP──► FastAPI          │  HybridRetriever: BGE-M3 + BM25          │
  (/chat        (app/api.py)     │      → RRF 融合 → BGE-reranker 精排      │
-  /approve)        │            │  GraphRetriever: Text2Cypher → Neo4j     │
+  /resume)         │            │  GraphRetriever: Text2Cypher → Neo4j     │
                    ▼            └──────────────────────────────────────────┘
             LangGraph supervisor 图 (app/agents.py)          ▲
               ├─ ①情绪双层拦截  ②FAQ 语义缓存  ③Pydantic 路由 │
               ├─ qa       ── knowledge / compatibility / diagnosis(检索前指代消解改写)
-              ├─ action   ── Function Calling 循环 + interrupt 人工审核 + Reflection 自愈
-              ├─ chitchat ── 直接回复
+              ├─ action   ── Function Calling 循环 + 澄清追问(interrupt)+ Reflection 自愈
+              ├─ chitchat ── 直接回复;读对话历史答"我骑的是什么"这类记忆型提问
               └─ complaint── 安抚 + 登记工单
-              State + MemorySaver(按 thread_id 多轮记忆 / 审批暂停-恢复)
+              State + MemorySaver(按 thread_id 多轮记忆 / 澄清暂停-恢复)
                    │
               LangSmith 全链路可观测
 ```
@@ -71,15 +71,16 @@
 
 **Agent 安全闭环(ActionAgent)**
 
-- Function Calling 业务办理 — ActionAgent 以 ReAct 式循环调度业务工具(查订单/预约保养/申请退款,mock 数据真实接口),轮数上限防失控
-- Human-in-the-Loop 人工审核 — 高危操作(退款)执行前经 LangGraph interrupt 暂停,状态存入 checkpointer,商家批准后断点续跑;已驳回操作在本轮内禁止重复申请
+- Function Calling 业务办理 — ActionAgent 以 ReAct 式循环调度业务工具(查订单/预约保养/申请退款),轮数上限防失控;工具经 MCP 远程调用,背后是 Spring Boot + Postgres 的真实业务库
+- Human-in-the-Loop — 两类人机交互都归编排层:①**澄清追问**,LLM 缺必要信息(订单号 / 预约日期)且无法从历史推断时只能调 `ask_user`,经 LangGraph interrupt 暂停、状态存 checkpointer,用户补答后 `Command(resume)` 断点续跑;②**高危审批**已工单化脱离对话线程(退款开 PENDING 工单交商家控制台批复,见下方「二期」)
 - Reflection 自愈 — 工具失败时 LLM 分析错误并生成修复建议回流重试(≤3 次),超限告警转人工;错误信息内置修复线索(可约日期、格式约束),对资金操作保守不猜测
-- 工具分层 — 工具实现框架无关(未来可平替为业务系统 HTTP 调用),高危名单随工具声明,审批拦截归编排层执行(声明与执行分离)
+- 系统参数隔离 — `session_id` / `user_id` 这类可信身份参数从发给 LLM 的 schema 中剥离,由编排层覆盖式注入后经 MCP 透传;LLM 看不到也改不了,工单归属可证明来自验签 JWT
 
 **服务化与多轮记忆**
 
-- FastAPI 后端服务 — `/chat` 对话端点 + `/approve` 商家审批端点,session_id 即 LangGraph thread_id;interrupt 审批以"pending_approval 状态 + 二次请求恢复"的异步模式承载(不占连接等待人工)
+- FastAPI 后端服务 — `/chat` 对话端点 + `/resume` 澄清恢复端点,session_id 即 LangGraph thread_id;挂起以"`pending_clarification` 状态 + 二次请求恢复"的异步模式承载(不占连接等待人工)
 - 多轮对话记忆 — State 挂载 `messages` 历史(`add_messages` reducer 追加式合并),checkpointer 按 thread_id 持久化;跨轮上下文使 ActionAgent 无需用户重复订单号即可续办业务
+- 记忆型提问直答 — 用户问"我骑的是什么"这类**答案在对话史里、不在手册里**的问题,由路由判 chitchat 并读账本直接回,不惊动检索;防幻觉边界不动摇(生成层仍只看检索资料,只有 chitchat 一路读历史,历史里没有的如实说不知道)
 - 同步/异步边界治理 — 请求处理函数走 FastAPI 线程池(同步 def),避免 CPU 密集的 embedding 与阻塞 LLM 调用冻结事件循环
 - 序列化边界纪律 — checkpoint 内只存纯数据(dict),Pydantic 模型仅在 LLM 输出边界校验后即脱壳,规避自定义类反序列化风险
 
@@ -140,13 +141,15 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 
 ```
                         ┌─ complaint: 安抚话术,优先转人工
-用户 ─► supervisor ──┼─ chitchat:  直接回复(FAQ 命中也走这里,不再生成)
+用户 ─► supervisor ──┼─ chitchat:  直接回复 / 读对话史答记忆型提问(FAQ 命中也走这里,不再生成)
         │ ①情绪双层拦截 ├─ qa:        knowledge→向量检索 / compatibility→图检索 / diagnosis→拆解+HyDE
-        │ ②FAQ 语义缓存 └─ action:    业务办理(Function Calling 循环 + interrupt 人工审核 + Reflection 自愈)
+        │ ②FAQ 语义缓存 └─ action:    业务办理(Function Calling 循环 + 澄清追问 + Reflection 自愈;退款开工单)
         │ ③Pydantic 路由
 ```
 
-路由决策用 Pydantic 模型钉死契约(`target` / `strategy` 均为 Literal 枚举),LLM 输出不合法时兜底走最安全的知识检索路线。相比 if 链,图结构的价值在于 State 可持久化——为后续 checkpointer 对话记忆与 interrupt 人工审核(HITL)铺路。
+路由决策用 Pydantic 模型钉死契约(`target` / `strategy` 均为 Literal 枚举),LLM 输出不合法时兜底走最安全的知识检索路线。相比 if 链,图结构的价值在于 State 可持久化——为后续 checkpointer 对话记忆与 interrupt 人机交互(HITL)铺路。
+
+路由的判据是**"答案在哪"而不是"句子里出现了什么词"**:"我骑的是 Ninja 400""我骑的是什么"都带车型名,但答案在对话历史里而非手册里,应判 chitchat 由该路读账本直答;只有答案确实在手册 / 图谱 / 故障知识里的才判 qa 去检索。这条判据是被真实 bug 逼出来的——早期路由只看"有没有车型词",把记忆型提问送进了向量库。
 
 ## 已实现功能 / Roadmap
 
@@ -163,11 +166,12 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 情绪拦截:BGE-M3 语义匹配 + LLM 指向判断的双层拦截,真投诉优先安抚转人工
 - 多 Agent 架构:LangGraph supervisor 模式,QA / Action / chitchat / complaint 四路分流(`app/agents.py`)
 - Pydantic:路由决策的结构化输出校验(Literal 枚举 + 解析失败兜底)
-- 安全闭环:ActionAgent 业务工具调用 + interrupt 人工审核(HITL)+ Reflection 自愈重试(`app/tools.py` + `app/agents.py`)
+- 安全闭环:ActionAgent 业务工具调用 + interrupt 人机交互(HITL)+ Reflection 自愈重试(`app/agents.py` + `tool-service/tools.py`)
 - LangSmith:全链路可观测,各路由成本分层可视化
-- FastAPI 服务化:`/chat` + `/approve` 端点,审批的"暂停-恢复"经 HTTP 两段式交互完成(`app/api.py`)
+- FastAPI 服务化:`/chat` + `/resume` 端点,挂起的"暂停-恢复"经 HTTP 两段式交互完成(`app/api.py`)
 - 多轮对话记忆:State 挂载 messages 历史(add_messages reducer),ActionAgent 跨轮续办业务
 - 对话式 RAG:qa 检索前用对话历史做指代消解改写(`rewrite_with_history`,"那多久换一次"→"火花塞多久换一次")
+- 记忆型提问:"我骑的是什么"这类答案在对话史里的问题判 chitchat 并读账本直答,不再误送向量检索
 - MCP:FastMCP 服务器封装业务工具 + 客户端动态发现(`lab/lab_d9_*.py`)
 - 真实语料入库:6 本车主手册 PDF → 逐页提取 + 定长/重叠切块 + 来源前缀 → 1093 块 + 8 内置片段(`lab/lab_d10_1_ingest.py` + `lab/lab_d10_2_build_corpus_db.py`)
 - 评估体系:43 条评估集(13 维度)+ 评估脚本,产出路由/命中/延迟/审批指标(`data/eval_set.json` + `lab/lab_d10_3_eval.py`,详见下方「评估结果」)
@@ -177,11 +181,11 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 退款工单化:审批脱离对话线程 —— `request_refund` 开工单(PENDING)而非 interrupt 挂起,对话立刻结束;商家控制台批复后业务系统**无 LLM 确定性执行**,结果轮询回推对话(一次性解决"审批寄生对话线程"引发的僵尸复活 / 商家批复蒸发 / 锁会话 / 端点裸奔四坑)
 - Spring Boot 业务系统:订单 / 槽位 / 退款工单入 Postgres,业务规则唯一权威;Service 接口化 + DataSeeder 幂等种子(`business-system/`)
 - React 前端:用户聊天窗(含澄清追问 + 工单结果回推)+ 商家审批控制台(`frontend/`)
-- MCP 生产化:工具拆成独立进程(`tool-service/`,HTTP :9000),ActionAgent 经 `app/mcp_client.py`(async→sync 桥)动态发现 + 远程调用;系统参数(session_id)对 LLM 隐藏但穿透到底
+- MCP 生产化:工具拆成独立进程(`tool-service/`,HTTP :9000),ActionAgent 经 `app/mcp_client.py`(async→sync 桥)动态发现 + 远程调用;系统参数(session_id / user_id)对 LLM 隐藏但穿透到底
+- 用户系统 + 鉴权:Spring Security + JWT(HS384,BCrypt 存密码)无状态鉴权,用户 / 商家双角色授权矩阵(商家端点 `GET /tickets`、`/decide` 限 MERCHANT);FastAPI 用同一把密钥验签取 `sub` 注入 state,退款工单绑 `user_id`;前端登录门 + 按角色分流页面
 
 ### 🚧 进行中 / 📋 计划中
 
-- 🚧 用户系统 + 鉴权:登录注册、user_id 身份、角色授权(用户 / 商家),工单绑定 user_id,商家端点鉴权
 - 📋 持久化 checkpointer:MemorySaver → Postgres/Redis(重启不丢会话 + 多实例共享);跨会话长期记忆(按 user_id)
 - 📋 结果回推升级:轮询 → WebSocket/SSE(实时,免刷新丢 watch)
 - 📋 业务规则彻底下沉:7 天退款期校验从 Python 预检下沉 Spring Boot(唯一权威复验)
@@ -218,9 +222,11 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 ├── tool-service/            # MCP 工具服务(独立进程,HTTP :9000)
 │   ├── server.py            # @mcp.tool 薄壳 + HTTP 传输(工具经 MCP 暴露)
 │   └── tools.py             # 业务实现层:查订单/预约/退款,经 HTTP 调 Spring Boot
-├── business-system/         # 业务系统(Spring Boot + JPA + Postgres):订单/槽位/退款工单 + 状态机
+├── business-system/         # 业务系统(Spring Boot + JPA + Postgres):订单/槽位/退款工单 + 状态机 + 鉴权权威
 │   └── src/main/java/com/moto/business/   # entity / repository / service(+impl) / controller / dto
-├── frontend/                # React 前端(Vite):用户聊天窗 ChatPage + 商家控制台 ConsolePage
+│       ├── security/        # JwtUtil 签发校验 + JwtAuthFilter(principal=userId)
+│       └── config/          # SecurityConfig(无状态 + 端点授权矩阵)/ DataSeeder(幂等种子)
+├── frontend/                # React 前端(Vite):LoginPage 登录门 + 用户聊天窗 ChatPage + 商家控制台 ConsolePage
 ├── data/
 │   ├── moto_manual.py            # 内置保养知识片段(8 条,兜底语料)
 │   ├── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
@@ -298,7 +304,9 @@ uvicorn app.api:app --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-浏览器开 http://localhost:5173 用页面,或开 http://localhost:8000/docs 直接调 API。
+浏览器开 http://localhost:5173,先登录(`DataSeeder` 灌好的种子账号:顾客 `alice` / `alice123`,商家 `merchant` / `merchant123`,也可自行注册),登录后按角色分流——顾客进聊天窗,商家进审批控制台。
+
+> `/chat` 与 `/resume` 都要求 `Authorization: Bearer <jwt>`,令牌由 Spring Boot 的 `/api/auth/login` 签发、FastAPI 用同一把密钥验签。直接调 http://localhost:8000/docs 时需先登录拿到令牌再填进 Authorize。
 
 ```bash
 # (可选)命令行跑完整多 Agent 流水线演示 / 单独测图检索 / 跑评估集

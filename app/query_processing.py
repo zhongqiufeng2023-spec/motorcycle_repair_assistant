@@ -107,9 +107,17 @@ def decide_route(question: str, history: list[dict] | None = None) -> RouteDecis
     {{"target": "qa" 或 "action" 或 "chitchat", "strategy": "knowledge" 或 "compatibility" 或 "diagnosis" 或 null}}
 
     target 说明:
-    - qa: 只读的信息查询(查手册参数、查配件兼容、排查故障)。此时 strategy 必填。
+    - qa: 只读的信息查询,且答案在【手册/配件图谱/故障知识】里(查参数、查配件兼容、排查故障)。此时 strategy 必填。
     - action: 需要【执行操作】(查订单、预约保养、申请退换货、修改订单)。strategy 填 null。
-    - chitchat: 闲聊、问候、感谢。strategy 填 null。
+    - chitchat: 闲聊、问候、感谢;以及【用户陈述自身情况】或【询问他自己先前说过的信息】
+      (这类答案在对话历史里,不在手册里)。strategy 填 null。
+
+    优先判据(先判这两条,再考虑 strategy):
+    - 用户只是【陈述】自己的情况、并没有提问 → chitchat。
+      例:"我骑的是 Ninja 400" / "我的车是 2019 款" / "我刚提了新车"
+    - 用户问的是【他自己之前告诉过你的信息】→ chitchat。
+      例:"我骑的是什么" / "我刚说的订单号是多少" / "你还记得我的车吗"
+    - 句子里出现车型或配件名,不等于要查手册——先看用户真正想要什么。
 
     strategy 说明(仅 target=qa 时):
     - knowledge: 问某个数值参数/规格/保养周期,不涉及"查是哪个配件"。例:"火花塞电极间隙是多少"(问间隙数值) / "机油多久换一次"(问周期) / "轮胎气压多少"

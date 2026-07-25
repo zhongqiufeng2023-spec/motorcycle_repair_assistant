@@ -83,10 +83,16 @@ def _reflect_on_failure(tool_name: str, args: dict, error: str, question: str) -
         messages=[{"role": "user", "content": prompt}], temperature=0)
     return resp.choices[0].message.content.strip()
 
-def _chitchat_reply(question: str) -> str:
-    """闲聊:不检索,直接回"""
-    resp = llm.chat.completions.create(model="deepseek-chat",
-    messages=[{"role": "user", "content": f"你是友好的摩托车客服,请简短回复:{question}"}])
+def _chitchat_reply(question: str, history: list[dict] | None = None) -> str:
+    """闲聊 + 记忆型提问:不检索,带对话历史直接回。
+    读账本是这一路的关键——用户问"我骑的是什么"这类问题,答案在历史里而不在手册里。"""
+    msgs = [{"role": "system", "content":
+             "你是友好的摩托车客服。可以依据对话历史回答用户问的、他自己先前说过的信息"
+             "(如车型、订单号、偏好)。历史里没有的就如实说不知道,绝不编造。"
+             "回复简短,用简体中文。"}]
+    # _history 的末条就是本轮问题;没有历史时退化成只带当前问题
+    msgs += history if history else [{"role": "user", "content": question}]
+    resp = llm.chat.completions.create(model="deepseek-chat", messages=msgs)
     return resp.choices[0].message.content
 
 def _complaint_reply(question: str) -> str:
@@ -210,8 +216,11 @@ def action_node(state: AgentState) -> dict:
             except json.JSONDecodeError:
                 args = {}
             if tc.function.name == "request_refund":
-                args["session_id"] = state.get("session_id")   # 会话号不由 LLM 提供,节点注入,经 MCP 透传到工具服务
-                args["user_id"] = state.get("user_id")         # 登录用户 id 同样节点注入、对 LLM 隐藏,经 MCP 透传绑到工单
+                # 会话号/用户 id 不由 LLM 提供,节点注入,经 MCP 透传到工具服务。
+                # 必须兜成空串:MCP schema 声明的是 str,直接塞 None 会被 Pydantic 拒掉
+                # (整个调用还没发出就失败),导致无 session/user 的调用路径退款全挂。
+                args["session_id"] = state.get("session_id") or ""
+                args["user_id"] = state.get("user_id") or ""
             result = mcp_client.call(tc.function.name, args)    # 远程执行:tools/call → :9000 工具服务(桥接见 app/mcp_client)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, ensure_ascii=False)})  # 要点⑤
             if tc.function.name == "request_refund" and result.get("ok") and result.get("ticket_id"):
@@ -219,16 +228,19 @@ def action_node(state: AgentState) -> dict:
             if not result.get("ok", True):
                 fail_count += 1
                 if fail_count>=3:
-                    return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。", error = f"连续失败{fail_count}次,已转人工" )
+                    # 带上 ticket_id:复合请求里退款可能已开单成功、后一个工具才连败转人工。
+                    # 不带出去 = 一张真实存在的工单前端不知道去轮询,商家批复结果永远推不回来。
+                    return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。",
+                                  ticket_id=opened_ticket_id, error = f"连续失败{fail_count}次,已转人工" )
                 advice = _reflect_on_failure(tc.function.name, args, result.get("error",""),q)
                 messages.append({"role": "user","content": f"【系统反思】工具 {tc.function.name} 调用失败。分析建议:{advice}。""若建议可执行,请修正后重试;若无法修复,请如实向用户说明,不要再重试。"})
-    return _final("抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。")
+    return _final("抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。", ticket_id=opened_ticket_id)
 
 
 def chitchat_node(state: AgentState) -> dict:
     if state.get("answer"):   # FAQ 已经给过答案,别覆盖
         return {}
-    return _final(_chitchat_reply(state["question"]))
+    return _final(_chitchat_reply(state["question"], _history(state)))
 
 def complaint_node(state: AgentState) -> dict:
     return _final( _complaint_reply(state["question"]))
