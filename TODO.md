@@ -192,12 +192,14 @@
   - 为什么推迟:纯视觉,非功能主线;当前普通登录卡完全够用。
   - 什么时候回来:二期前端打磨阶段,或录简历 demo 想加记忆点时。
 
-- [ ] **节点重放会重复开退款工单(潜在写重复,2026-07-25 review 发现)** ⚠️
-  - 是什么:`action_node` 里 `request_refund` 开工单是**真实写操作**,而它可能排在 `ask_user`(interrupt)**之前**。interrupt 恢复 = 节点从头重放 → 重放时 `request_refund` 再执行一次 → 同一订单开出**两张 PENDING 工单**(`TicketServiceImpl.open()` 无任何去重守卫,无脑 `repo.save`)。
+- [x] **节点重放会重复开退款工单** ✅ 2026-07-25 已修(review 发现,同日修复)
+  - 是什么:`action_node` 里 `request_refund` 开工单是**真实写操作**,而它可能排在 `ask_user`(interrupt)**之前**。interrupt 恢复 = 节点从头重放 → 重放时 `request_refund` 再执行一次 → 同一订单开出**两张 PENDING 工单**(原 `TicketServiceImpl.open()` 无任何去重守卫,无脑 `repo.save`)。
   - 触发场景:复合请求"退订单 12345,顺便约个保养" —— 退款先开单成功,预约缺日期 → `ask_user` → interrupt → 用户补答 → 节点重放 → 第二张工单。
-  - 这是**坑 6 的第二化身**:当年的教训是"真正的写操作必须放在 interrupt 之后",工单化之后写操作换了个名字(开工单)但位置没换,坑还在原地。
-  - 修法二选一:①业务系统加幂等 —— `open()` 前查"同 orderId 且状态 PENDING"已存在就返回原单(唯一约束更硬);②agent 侧记住本轮已开过的 orderId,重放时跳过(弱,重放会清空局部变量,得存 State)。**倾向 ①**:幂等归业务系统才是唯一权威,agent 侧的记账挡不住重放。
-  - 为什么现在不修:属于业务系统状态机的设计变更,不该混进"记忆修复"这次提交;且需要重跑一遍复合场景验证。
+  - 这是**坑 6 的第二化身**:当年的教训是"真正的写操作必须放在 interrupt 之后";工单化之后写操作换了个名字(执行退款→开工单)、interrupt 换了用途(审批→澄清追问),**位置却跑到了挂起点前面**,老约束被悄悄违反。重构后没人会去复查一条针对旧代码写的规则。
+  - **为什么幂等只能落在业务系统**:agent 侧记不住任何事 —— 被 interrupt 打断时节点根本没 `return` 过,state 补丁没提交、局部变量随重放清零。**能跨重放记住事情的,只有重放管不到的地方**,也就是数据库。这与"业务规则唯一权威在业务系统"是同一条原则。
+  - **采用的修法(硬版)**:`config/SchemaGuards`(新建)启动时建**部分唯一索引** `uniq_pending_ticket_per_order ON refund_tickets(order_id) WHERE status='PENDING'`。条件必须带 `WHERE status='PENDING'` —— 工单被驳回后用户应该还能再申请,约束要精确表达"同订单同时只能有一张待审",而不是"一辈子只能退一次"。JPA 的 `@Table(indexes=...)` 表达不了带条件的索引,故走 JdbcTemplate 原生 DDL(`IF NOT EXISTS` 幂等,同 DataSeeder 纪律)。`TicketServiceImpl.open()` 配套改幂等:快路径查已有待审单直接返回,`save` 撞约束则回头取先到者那张。
+  - **两个 Java 陷阱(面试素材)**:①`open()` 上**必须拿掉 `@Transactional`** —— 同一事务里撞约束后事务被标记 rollback-only、Postgres 连接进入 aborted 状态,`catch` 里再查库直接报 `current transaction is aborted`;不加事务时 `save` 走 Spring Data 自带那层事务、失败独立回滚,`catch` 的查询是全新事务才看得见别人已提交的行。②别想着抽个 `@Transactional(REQUIRES_NEW)` 私有方法 —— **Spring 事务靠代理,`this.xxx()` 自调用不过代理**,注解等于没写。③附带细节:`@GeneratedValue(IDENTITY)` 逼 Hibernate 在 persist 时立刻 INSERT(要取生成的 id),所以约束冲突在 `save()` 当场抛出而非拖到 commit,`catch (DataIntegrityViolationException)` 才接得稳。
+  - **实测**:①启动时库里有 9 张 12345 的 PENDING(历次调试积压)→ 索引建不上,SchemaGuards **fail-loud 报清订单号/张数/可直接执行的清理 SQL,且不拖垮服务**(照常起来);②归档重复单后索引建立成功;③已有待审单的订单再开 → 返回原单号;④**8 个并发请求同时开同一订单 → 7 个撞上唯一约束(SQLState 23505)、库里只落 1 行、8 个客户端全部拿到同一个单号**。这条证明了"先查后插"单独用是错的:8 个请求全部穿过了那一查。
 
 - [ ] **MCP 工具签名的标注与默认值不一致(None bug 的病根)**
   - `tool-service/tools.py` 的 `request_refund(..., session_id: str = None, user_id: str = None)`:**标注写 `str`、默认给 `None`**。fastmcp 只看标注生成 JSON Schema,于是 schema 声明这两个是必填 `str`,显式传 `None` 会被 Pydantic 在**调用发出之前**拒掉(表现:业务系统日志干干净净,像调用从没发生过)。
