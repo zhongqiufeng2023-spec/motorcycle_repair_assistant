@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 load_dotenv()
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 
 def decompose_query(question: str) -> list[str]:
@@ -17,7 +18,7 @@ def decompose_query(question: str) -> list[str]:
 
 拆解结果:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )

@@ -1,3 +1,4 @@
+import os
 import json
 from typing import Annotated, Literal
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -11,6 +12,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import ToolMessage
 
 load_dotenv()
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 
 @tool 
 def calculator(expression: str) -> str:
@@ -19,7 +21,7 @@ def calculator(expression: str) -> str:
 
 tools = [calculator]
 tools_by_name = {t.name: t for t in tools}
-llm = ChatDeepSeek(model="deepseek-chat").bind_tools(tools)
+llm = ChatDeepSeek(model=MODEL).bind_tools(tools)
 
 
 class State(TypedDict):

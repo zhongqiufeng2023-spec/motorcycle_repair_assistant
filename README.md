@@ -9,11 +9,12 @@
   /resume)         │            │  GraphRetriever: Text2Cypher → Neo4j     │
                    ▼            └──────────────────────────────────────────┘
             LangGraph supervisor 图 (app/agents.py)          ▲
-              ├─ ①情绪双层拦截  ②FAQ 语义缓存  ③Pydantic 路由 │
-              ├─ qa       ── knowledge / compatibility / diagnosis(检索前指代消解改写)
-              ├─ action   ── Function Calling 循环 + 澄清追问(interrupt)+ Reflection 自愈
-              ├─ chitchat ── 直接回复;读对话历史答"我骑的是什么"这类记忆型提问
-              └─ complaint── 安抚 + 登记工单
+              ├─ ①情绪双层拦截 ②FAQ 逐子句匹配 ③路由→intents[]│
+              ├─ qa       ── knowledge / compatibility / diagnosis(检索前指代消解改写)  ┐
+              ├─ action   ── Function Calling 循环 + 澄清追问(interrupt)+ Reflection 自愈 │ 并行扇出
+              ├─ chitchat ── 直接回复;读对话历史答"我骑的是什么"这类记忆型提问          │(同超步)
+              └─ complaint── 安抚 + 登记工单                                          ┘
+                        └──► merge 扇入:缝合各路答案(业务回执一字不改)+ 记账 ──► 回复
               State + MemorySaver(按 thread_id 多轮记忆 / 澄清暂停-恢复)
                    │
               LangSmith 全链路可观测
@@ -32,7 +33,8 @@
 
 **大模型**
 
-- DeepSeek(deepseek-chat)— 通过 OpenAI 兼容 SDK 调用,负责答案生成
+- DeepSeek — 通过 OpenAI 兼容 SDK 调用,负责答案生成。模型名不硬编码,统一由 `.env` 的
+  `LLM_MODEL` 提供(默认 `deepseek-v4-flash`),集中在 `app/config.py` 读取
 - openai(SDK)— 作为调用 DeepSeek 的客户端
 
 **Agent 编排**
@@ -50,7 +52,7 @@
 
 **查询理解与动态路由(Query Understanding)**
 
-- FAQ 语义缓存 — BGE-M3 向量 + 余弦相似度匹配高频问题,命中直接返回,不消耗 LLM 调用
+- FAQ 语义缓存 — BGE-M3 向量 + 余弦相似度匹配高频问题,命中直接返回,不消耗 LLM 调用;**按标点/连接词/换行逐子句匹配**,只有每个子句都被覆盖才短路整句(否则复合问句的第二问会被静默丢弃)
 - 意图分类 — LLM 零样本分类(temperature=0),将问题分流为 chitchat / knowledge / diagnosis 三类,带解析兜底
 - HyDE(Hypothetical Document Embeddings)— 生成假设性答案作为检索"诱饵",拉近口语化提问与书面语料的语义距离
 - 子问题拆解 — 复合问题拆为独立子问题分别检索再汇总,JSON 解析失败自动降级为单一问题
@@ -112,14 +114,19 @@
 在混合检索之上增加一层**成本分层的查询理解与路由**:核心思想是每一层都用当前最低成本的手段拦截它能处理的问题,把昂贵的检索与查询改写留给真正需要的复杂问题。
 
 ```
-提问 ──► ① FAQ 语义匹配(最便宜,命中直接返回,不惊动 LLM)
-           │ 未命中
+提问 ──► ① FAQ 逐子句语义匹配(最便宜,不惊动 LLM;实测全覆盖短路 0.24s)
+           ├─ 每个子句都被覆盖 ─► 直接返回(可返回多条答案)
+           ├─ 部分子句被覆盖   ─► FAQ 那段先入账,只把未覆盖子句交给 ②
+           │ 一条都没覆盖
            ▼
-        ② 意图分类(一次 LLM 调用)
+        ② 路由决策(一次 LLM 调用,输出 intents[])
            ├─ chitchat:  直接回复,不检索
            ├─ knowledge: 混合检索 ──────────────────► 生成
+           ├─ compatibility: Text2Cypher 图检索 ────► 生成
            └─ diagnosis: 子问题拆解 + HyDE 改写 ──► 逐个检索、汇总去重 ──► 生成
 ```
+
+**为什么 FAQ 要逐子句而不是拿整句比**:FAQ 判定跑在路由之前,一命中就短路。整句 encode 会把多件事揉进一个向量——"你们几点开门,顺便查下订单12345"整句相似度 0.850 ≥ 0.75,于是命中、短路,**订单查询被静默丢弃**。提高阈值不可行(应命中的改写单句最低 0.820 < 复合句最高 0.851,区间方向反了):**整体相似度不携带「这句话里有几件事」的信息**。切成子句后信号维度才对上,判据变成「只有每个子句都被覆盖才允许短路整句」,复用同一个 0.75 阈值、零新参数。
 
 生成层严格基于检索资料回答,资料中没有的信息如实告知,不编造(防幻觉),并返回引用的资料条数(可溯源)。
 
@@ -137,17 +144,23 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 
 ## 架构:LangGraph supervisor 多 Agent(agents.py)
 
-整条流水线以 LangGraph StateGraph 组织:所有节点共享一个 State(问题、路由决策、检索资料、答案、溯源信息),supervisor 节点统一决策,条件边按决策分发。**情绪拦截在最前**(先于 FAQ,保证愤怒用户不会被缓存答案打发),FAQ 命中则由 supervisor 直接给答案不再惊动下游。
+整条流水线以 LangGraph StateGraph 组织:所有节点共享一个 State(问题、路由决策、检索资料、答案、溯源信息),supervisor 节点统一决策,条件边按决策分发。**情绪拦截在最前**(先于 FAQ,保证愤怒用户不会被缓存答案打发),FAQ 全覆盖时由 supervisor 直接给答案不再惊动下游。
+
+条件边返回的是**列表**:一句话里若有多件事分属不同处理单元,同一超步**并行扇出**多个分支(LangGraph 用线程池跑,两支的 IO 等待重叠),再统一**扇入** `merge` 缝成一段回复。
 
 ```
-                        ┌─ complaint: 安抚话术,优先转人工
-用户 ─► supervisor ──┼─ chitchat:  直接回复 / 读对话史答记忆型提问(FAQ 命中也走这里,不再生成)
-        │ ①情绪双层拦截 ├─ qa:        knowledge→向量检索 / compatibility→图检索 / diagnosis→拆解+HyDE
-        │ ②FAQ 语义缓存 └─ action:    业务办理(Function Calling 循环 + 澄清追问 + Reflection 自愈;退款开工单)
-        │ ③Pydantic 路由
+                          ┌─ complaint: 安抚话术,优先转人工      ┐
+用户 ─► supervisor ──┼─ chitchat:  直接回复 / 读对话史答记忆型提问 │
+        │ ①情绪双层拦截    ├─ qa:  knowledge→向量检索 / compat→图检索 ├─► merge ─► 回复
+        │ ②FAQ 逐子句匹配  └─ action: 业务办理(FC 循环+澄清追问+自愈) ┘   缝合/记账
+        │ ③Pydantic 路由 → intents[]        ↑ 多意图时并行激活多支
 ```
 
-路由决策用 Pydantic 模型钉死契约(`target` / `strategy` 均为 Literal 枚举),LLM 输出不合法时兜底走最安全的知识检索路线。相比 if 链,图结构的价值在于 State 可持久化——为后续 checkpointer 对话记忆与 interrupt 人机交互(HITL)铺路。
+路由决策用 Pydantic 模型钉死契约(`intents[]`,每个 intent 的 `target` / `strategy` 均为 Literal 枚举),LLM 输出不合法时兜底走最安全的知识检索路线。相比 if 链,图结构的价值在于 State 可持久化——为 checkpointer 对话记忆与 interrupt 人机交互(HITL)铺路,并让并行扇出的写入冲突由 reducer 显式声明合并策略而非静默覆盖。
+
+**`merge` 缝合的铁律:业务回执一字不改。** qa 那半是只读信息,润色无妨;action 那半是回执——工单真开了、槽位真占了,让 LLM 重写就可能让用户看到的和系统实际做的不一致。所以回执原文保留,只润色信息段并写衔接。
+
+**并行 × interrupt 的重放粒度是「节点」不是「超步」**:action 半边触发澄清追问挂起时,同超步已跑完的 qa 半边的写入已记入 checkpoint 的 pending writes,恢复时只重跑被打断的那个节点,qa 不会被重放(检索与生成不重复计费)。反过来,被打断的节点自己**会**从头重放——这正是退款开工单必须幂等的原因。
 
 路由的判据是**"答案在哪"而不是"句子里出现了什么词"**:"我骑的是 Ninja 400""我骑的是什么"都带车型名,但答案在对话历史里而非手册里,应判 chitchat 由该路读账本直答;只有答案确实在手册 / 图谱 / 故障知识里的才判 qa 去检索。这条判据是被真实 bug 逼出来的——早期路由只看"有没有车型词",把记忆型提问送进了向量库。
 
@@ -159,7 +172,7 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - LangGraph:StateGraph、条件边、checkpointer 记忆
 - 向量检索:BGE-M3 embedding + ChromaDB 向量库
 - 混合检索:BGE-M3 + BM25 + RRF 融合 + BGE-reranker 精排(`app/retriever.py`)
-- 查询理解:FAQ 语义缓存、意图分类、HyDE、子问题拆解(`app/query_processing.py`)
+- 查询理解:FAQ 语义缓存(逐子句匹配,只在每个子句都被覆盖时短路)、意图分类、HyDE、子问题拆解(`app/query_processing.py`)
 - 动态路由:FAQ → Pydantic 路由 → 多路分流的完整问答流水线(`app/agents.py` + `app/query_processing.py`)
 - 图检索:Neo4j 知识图谱 + Text2Cypher(schema 注入 + 只读 / EXPLAIN 双重护栏)(`app/graph_retriever.py`)
 - 双引擎路由:按问题类型在向量检索与图检索间动态选择
@@ -174,7 +187,7 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 记忆型提问:"我骑的是什么"这类答案在对话史里的问题判 chitchat 并读账本直答,不再误送向量检索
 - MCP:FastMCP 服务器封装业务工具 + 客户端动态发现(`lab/lab_d9_*.py`)
 - 真实语料入库:6 本车主手册 PDF → 逐页提取 + 定长/重叠切块 + 来源前缀 → 1093 块 + 8 内置片段(`lab/lab_d10_1_ingest.py` + `lab/lab_d10_2_build_corpus_db.py`)
-- 评估体系:43 条评估集(13 维度)+ 评估脚本,产出路由/命中/延迟/审批指标(`data/eval_set.json` + `lab/lab_d10_3_eval.py`,详见下方「评估结果」)
+- 评估体系:54 条评估集 / 57 次记录(16 维度)+ 评估脚本,产出路由/命中/延迟/追问指标(`data/eval_set.json` + `lab/lab_d10_3_eval.py`,详见下方「评估结果」)
 
 **二期(生产化)**
 
@@ -183,6 +196,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - React 前端:用户聊天窗(含澄清追问 + 工单结果回推)+ 商家审批控制台(`frontend/`)
 - MCP 生产化:工具拆成独立进程(`tool-service/`,HTTP :9000),ActionAgent 经 `app/mcp_client.py`(async→sync 桥)动态发现 + 远程调用;系统参数(session_id / user_id)对 LLM 隐藏但穿透到底
 - 用户系统 + 鉴权:Spring Security + JWT(HS384,BCrypt 存密码)无状态鉴权,用户 / 商家双角色授权矩阵(商家端点 `GET /tickets`、`/decide` 限 MERCHANT);FastAPI 用同一把密钥验签取 `sub` 注入 state,退款工单绑 `user_id`;前端登录门 + 按角色分流页面
+- 多意图并行:路由输出 `intents[]`,条件边返回列表在同一超步**并行扇出**多个分支(线程池,IO 等待重叠),四路统一扇入 `merge` 缝合;合并时**业务回执一字不改**(工单已开、槽位已占,改写会让用户看到的与系统实际做的不符),仅润色信息段。拆不拆的判据是「是否分属不同处理单元」而非「用户说了几件事」(`app/agents.py`)
+- LLM 模型名集中配置:`app/config.py` 读 `.env` 的 `LLM_MODEL`,供应商改名/下线时只改一处(此前硬编码散落 26 处 / 15 个文件)
 
 ### 🚧 进行中 / 📋 计划中
 
@@ -192,21 +207,28 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - 📋 本地模型:Ollama + Qwen2.5-7B,云端 / 本地双后端切换
 - 📋 Docker / docker-compose:一键编排全套服务
 - 📋 LLM-as-judge:答案质量自动评分(当前命中率用要点匹配)
+- 📋 FAQ 降级到 intent 级:彻底解决无标点复合句仍被 FAQ 短路的上限(用例 `faqmix-05`),代价是每次先付一次路由 LLM 调用,当前不划算
 
 ## 评估结果
 
-自建 43 条评估集(`data/eval_set.json`,覆盖 FAQ 命中/误拦、knowledge、compatibility(含带/不带年份)、diagnosis、chitchat、真投诉 vs 负面词描述故障、action(单工具/复合/高危审批)、多轮指代、多源冲突共 13 个维度;投诉用例刻意不复用检测样例以防数据泄漏),经进程内 `invoke` 直接读取路由与检索上下文计算指标(`lab/lab_d10_3_eval.py`)。
+自建 54 条评估集 / 57 次记录(`data/eval_set.json`,覆盖 FAQ 命中/误拦、FAQ 与其他意图混合、knowledge、compatibility(含带/不带年份)、diagnosis、chitchat、真投诉 vs 负面词描述故障、action(单工具/复合/高危)、多意图并行(含防过拆对照组)、多轮指代、多源冲突共 16 个维度;投诉用例刻意不复用检测样例以防数据泄漏),经进程内 `invoke` 直接读取路由与检索上下文计算指标(`lab/lab_d10_3_eval.py`)。
 
 | 指标 | 结果 | 说明 |
 |---|---|---|
-| 路由准确率 | **~98%** | 46 条评估上全对;集合偏小且 prompt 对其迭代过,诚实报 ~98% 而非满分 |
-| 检索要点命中率 | **~97%** | 期望要点出现在检索上下文/答案中的比例 |
+| 路由准确率 | **~98%**(56/57) | 唯一失败是刻意留在集内的已知上限用例(见下)|
+| 检索要点命中率 | **~98%**(40/41) | 期望要点出现在检索上下文/答案/澄清追问中的比例 |
 | FAQ 拦截 / 误拦 | 命中 **100%** / 误拦 **0** | 办理类措辞不被 FAQ 劫持 |
+| FAQ 短路延迟 | **0.24s** | 全覆盖时零 LLM 调用,比走 LLM 的路径快约 100 倍——成本分层的实测收益 |
 | 投诉识别 | 召回 **100%** / 对照组误报 **0** | "刹车失灵""异响"等负面词描述故障正确判为 diagnosis |
-| 端到端延迟 | P50 **3.9s** / P95 14.4s | 慢尾为 diagnosis(子问题拆解 + HyDE 多次检索) |
-| 高危审批触发 | 按需 | 超期退款经工具 description 预检直接拒,无需惊动审批 |
+| 多意图并行 | **5/5** | 含 2 条防过拆对照组(同处理单元不许拆、投诉优先于拆分)|
+| 端到端延迟 | P50 **6.8s** / P95 19.2s | 慢尾为 diagnosis(拆解+HyDE 多次检索)与多意图(并行两支 + merge 缝合各一次 LLM)|
+| 澄清追问 | 触发 4 次 / 卡住 **0** | 每条用例带脚本化答话,追问后跑到终局才计入指标 |
 
-> 评估过程反向发现并修复了 2 个真实缺陷:①图查询 `RETURN` 遗漏车型名导致答案误判"未找到"(修:返回自解释字段);②品牌中英不一致 + "货号"措辞被路由误判(修:schema 中英映射 + 路由锚点判据)。此外暴露的对话式多轮指代缺口,已由检索前改写(`rewrite_with_history`)闭环。
+> **评估反向挖出并修复的真实缺陷**:①图查询 `RETURN` 遗漏车型名导致答案误判"未找到"(修:返回自解释字段);②品牌中英不一致 + "货号"措辞被路由误判(修:schema 中英映射 + 路由锚点判据);③多意图并行后 `answers` 累加器跨轮不清零,第二轮把上一轮答案缝进本轮(修:reducer 加清空哨兵,由汇总节点消费完即清);④`ticket_id` 跨轮滞留,前端对已结算工单重复轮询(修:入口归零);⑤**FAQ 短路吞掉第二问**——FAQ 判定跑在路由之前且用整句比,"你们几点开门,顺便查下订单12345"整句相似度 0.850 会误命中并短路,订单查询被静默丢弃(修:见下)。
+>
+> **评估自身的两个修复**(指标会撒谎):`resume` 由固定 `"yes"` 改为按用例脚本化答话——原先答非所问导致系统二次追问、返回值仍挂在中断上、`answer` 为空串,命中率被判假阴;澄清追问的问句纳入命中判定——"该日已满,改约 19 还是 20"这类正确信息本就长在问句里。
+
+**FAQ 逐子句匹配**:提高阈值不可行——实测应命中的改写单句最低 0.820、复合句最高 0.851,区间反向重叠(复合句分数高过改写单句)。根因是**整体语义相似度不携带「这句话里有几件事」的信息**。改为按标点/连接词切分后逐子句匹配,判据是「只有每一个子句都被 FAQ 覆盖才允许短路整句」,复用同一个 0.75 阈值、零新参数;部分覆盖时 FAQ 那段作为一路答案参与扇入合并,只把未覆盖的子句交给路由。已知上限:依赖标点,完全不打标点的复合句仍会短路(用例 `faqmix-05` 保留在集内量化该缺口)。
 
 ## 项目结构
 
@@ -214,10 +236,11 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 .
 ├── app/                     # Agent 服务(FastAPI + LangGraph)
 │   ├── api.py               # FastAPI:/chat 对话 + /resume 澄清恢复(session_id=thread_id;退款已工单化,无 /approve)
-│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 检索 + 生成 + HITL + 多轮记忆)
+│   ├── agents.py            # 主流水线:LangGraph supervisor 多 Agent(路由 + 多意图并行扇出/扇入 + 检索 + 生成 + HITL + 多轮记忆)
+│   ├── config.py            # LLM 模型名集中配置(读 .env 的 LLM_MODEL,供应商改名只改一处)
 │   ├── mcp_client.py        # MCP 客户端:async fastmcp Client 桥成同步接口 + schema 转换 + 剥系统参数
 │   ├── retriever.py         # HybridRetriever:混合检索核心模块
-│   ├── query_processing.py  # 查询理解:FAQ 缓存 / 投诉检测 / 路由决策 / HyDE / 拆解
+│   ├── query_processing.py  # 查询理解:FAQ 逐子句匹配 / 投诉检测 / 路由决策(intents) / HyDE / 拆解
 │   └── graph_retriever.py   # GraphRetriever:Text2Cypher 图检索 + 安全护栏
 ├── tool-service/            # MCP 工具服务(独立进程,HTTP :9000)
 │   ├── server.py            # @mcp.tool 薄壳 + HTTP 传输(工具经 MCP 暴露)
@@ -230,7 +253,7 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 ├── data/
 │   ├── moto_manual.py            # 内置保养知识片段(8 条,兜底语料)
 │   ├── parts_compatibility.csv   # 配件兼容数据(品牌 / 车型 / 配件 / 年份区间)
-│   ├── eval_set.json             # 评估集(43 条,13 维度)
+│   ├── eval_set.json             # 评估集(54 条 / 57 次记录,16 维度)
 │   ├── eval_results.json         # 评估运行结果(逐条明细,评估脚本产出)
 │   └── raw_manuals/              # 手册 PDF 原件(版权物,不入库;本地自备)
 ├── lab/                     # 各阶段学习实验脚本(验证通过后沉淀为 app/ 正式模块)

@@ -5,6 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.moto_manual import DOCS
 from app.retriever import HybridRetriever
 load_dotenv()
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 retriever = HybridRetriever(DOCS, chroma_path=os.path.join(BASE_DIR, "chroma_db"))
@@ -19,7 +20,7 @@ def generate_hyde(question: str) -> str:
 
 假设性答案:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,   # 稍微给点灵活性,但别太发散
     )

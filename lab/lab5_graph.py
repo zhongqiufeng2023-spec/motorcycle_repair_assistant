@@ -1,3 +1,4 @@
+import os
 from typing import Annotated
 from typing_extensions import TypedDict
 from dotenv import load_dotenv
@@ -6,7 +7,8 @@ from langgraph.graph.message import add_messages
 from langchain_deepseek import ChatDeepSeek
 
 load_dotenv()
-llm = ChatDeepSeek(model="deepseek-chat")
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+llm = ChatDeepSeek(model=MODEL)
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]

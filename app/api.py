@@ -55,9 +55,13 @@ def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     s = req.session_id
     config = {"configurable": {"thread_id": s}}
     # user_id 由验过的 JWT 取出、注入 state(和 session_id 一路):开退款工单时绑到这个用户
+    # 入口把【本轮字段】全部归零:state 是按 thread 存的,不显式重置的字段会带着上一轮的值活到这一轮。
+    # ticket_id 尤其要归零——它只由 action_node 写,这一轮若没走 action(如问了个知识题),
+    # 上一轮开的工单号会原样再发给前端,前端对一张已结算的工单重开轮询、重弹一次结算通知。
     result = app_graph.invoke({"question": q, "session_id": s, "user_id": user_id,
                                "messages":[{"role": "user", "content": q}],
-                               "contexts": [], "answer": "","route": "", "decision": None}, config)
+                               "contexts": [], "answer": "","route": "", "decision": None,
+                               "ticket_id": None}, config)
     return _to_response(result)
 
 @app.post("/resume", response_model = ChatResponse)

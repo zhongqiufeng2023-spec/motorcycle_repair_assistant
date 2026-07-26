@@ -4,6 +4,7 @@ from openai import OpenAI
 from neo4j import GraphDatabase
 
 load_dotenv()
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url=os.getenv("BASE_URL"))
 driver = GraphDatabase.driver(
     os.getenv("NEO4J_URI"),
@@ -43,7 +44,7 @@ def generate_cypher(question: str) -> str:
 
     Cypher:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role" : "user", "content" : prompt}],
         temperature = 0,
     )
@@ -79,7 +80,7 @@ def answer_from_graph(question: str, rows: list) -> str:
 
 【回答】"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )

@@ -1,8 +1,12 @@
-import os, re
+import os, sys, re
+# 直跑时项目根不在 sys.path,下面的 app.config 会 import 失败。补一行引导,
+# 让「直跑」和「作为包被 import」两种启动方式都成立(坑 7)。
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 from openai import OpenAI
 from neo4j import GraphDatabase
 from langsmith.wrappers import wrap_openai
+from app.config import MODEL
 
 class GraphRetriever:
     WRITE_PATTERN = r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DETACH|DROP)\b"
@@ -65,7 +69,7 @@ class GraphRetriever:
 
         Cypher:"""
         resp = self.llm.chat.completions.create(
-            model="deepseek-chat",
+            model=MODEL,
             messages=[{"role" : "user", "content" : prompt}],
             temperature = 0,
         )

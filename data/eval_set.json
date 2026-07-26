@@ -36,8 +36,9 @@
     "category": "faq_miss_action",
     "input": "我想约个时间过去做保养",
     "expected_route": "action/-",
-    "expected_points": [],
-    "note": "办理类,语义近'营业时间'但应走 action 不被 FAQ 拦。退货 FAQ 已停用,误拦风险当前较低,此为探针"
+    "expected_points": ["预约"],
+    "resume": ["2026-07-20"],
+    "note": "办理类,语义近'营业时间'但应走 action 不被 FAQ 拦。退货 FAQ 已停用,误拦风险当前较低,此为探针。没给日期→触发 ask_user 追问,resume 里补上日期才跑得完"
   },
   {
     "id": "faqmiss-02",
@@ -244,8 +245,9 @@
     "category": "action_single",
     "input": "帮我约2026-07-18的保养",
     "expected_route": "action/-",
-    "expected_points": ["满", "19日", "20日"],
-    "note": "约满场景;应如实告知并给可约日期。要点用鲁棒最小串(满/19日/20日),避免'已满'vs'满了'假阴性"
+    "expected_points": ["满", "2026-07-19", "2026-07-20"],
+    "resume": ["2026-07-19"],
+    "note": "约满场景;应如实告知并给可约日期。可约日期现在是经 ask_user 追问【连同 options 一起】给出的(实测追问原文:'2026-07-18的保养已约满,可选日期有2026-07-19和2026-07-20'),故要点按追问里的 ISO 日期写;旧要点'19日/20日'是 interrupt 改造前的答案措辞,已失效"
   },
   {
     "id": "action-04",
@@ -276,8 +278,9 @@
     "category": "action_single",
     "input": "帮我查订单12-345的状态",
     "expected_route": "action/-",
-    "expected_points": [],
-    "note": "带连字符;测自愈(错误信息提示去符号重试→改查12345)"
+    "expected_points": ["已签收"],
+    "resume": ["12345"],
+    "note": "带连字符;测自愈(错误信息提示去符号重试→改查12345)。resume 是保险丝:LLM 多数时候自己清洗后重试(不追问),偶尔会 ask_user 确认订单号——真没用上会被标'脚本剩1条没用上',那是信号不是错"
   },
   {
     "id": "multiturn-01",
@@ -301,10 +304,10 @@
     "id": "multiturn-03",
     "category": "multiturn_coref",
     "turns": [
-      {"input": "帮我约2026-07-18的保养", "expected_route": "action/-", "expected_points": ["满"]},
-      {"input": "那就约后一天吧", "expected_route": "action/-", "expected_points": ["预约"], "note": "指代'后一天';测 action 能否结合上文推出 07-19"}
+      {"input": "帮我约2026-07-18的保养", "expected_route": "action/-", "expected_points": ["满"], "resume": ["那就约后一天吧"], "note": "slot-filling 已改走 interrupt 主路,'后一天'这个指代现在发生在【轮内追问的答话】里。注意:要点只写'满'——追问原文里本就含 07-19/07-20 两个日期,若把日期写进要点,哪怕 LLM 订错天也会命中(子串指标的假阳性,同 comp-05),解析对不对得看 answer 或 LLM-judge"},
+      {"input": "我刚约的那天能不能改成20号", "expected_route": "action/-", "expected_points": ["预约"], "note": "跨轮指代'我刚约的那天'=07-19;无改期工具,期望 LLM 重新 book_service(2026-07-20)"}
     ],
-    "note": "多轮 slot 续填"
+    "note": "slot 续填;interrupt 主路化后 t1 在轮内追问、t2 才是真正的跨轮指代"
   },
   {
     "id": "conflict-01",
@@ -345,5 +348,94 @@
     "expected_route": "chitchat/-",
     "expected_points": [],
     "note": "闲聊;不检索"
+  },
+  {
+    "id": "mi-01",
+    "category": "multi_intent",
+    "input": "Ninja 400的火花塞是什么型号,顺便帮我约2026-07-20的保养",
+    "expected_route": "qa/compatibility+action/-",
+    "expected_points": ["CPR8EA-9", "预约"],
+    "note": "图谱查询 + 业务办理,分属不同处理单元 → 拆 2 个 intent 并行扇出,merge 缝合。两个要点各来自一半,丢哪半都判未中。注:expected_route 按【集合】比对(评估脚本 _route_ok),并行扇出的段序没有执行语义"
+  },
+  {
+    "id": "mi-02",
+    "category": "multi_intent",
+    "input": "火花塞电极间隙是多少,另外帮我查一下订单12346到哪了",
+    "expected_route": "qa/knowledge+action/-",
+    "expected_points": ["0.8", "配送中"],
+    "note": "手册检索 + 业务办理。相比 mi-01 换成 knowledge 策略,验证扇出对 qa 的两种策略都成立"
+  },
+  {
+    "id": "mi-03",
+    "category": "multi_intent_control",
+    "input": "冷却液多久换一次,刹车油又是多久",
+    "expected_route": "qa/knowledge",
+    "expected_points": ["3年", "两年"],
+    "note": "【防过拆对照组】两问都是手册知识=同一处理单元,应合并成 1 个 intent,不许拆成两路。与 action-06(查订单+约保养同属 action 也不拆)构成 qa/action 两侧的对称探针"
+  },
+  {
+    "id": "mi-04",
+    "category": "multi_intent",
+    "input": "Ninja 400的链条用哪款,顺便帮我约个保养",
+    "expected_route": "qa/compatibility+action/-",
+    "expected_points": ["DID 520", "预约"],
+    "resume": ["2026-07-20"],
+    "note": "多意图 × 澄清追问:action 半边缺日期触发 ask_user,qa 半边已在同一超步跑完。resume 后两半都要活着到 merge。附带验证【已完成的兄弟节点不被重放】——interrupt 的重放粒度是节点不是超步"
+  },
+  {
+    "id": "faqmix-01",
+    "category": "faq_mixed",
+    "input": "你们几点开门,顺便帮我查下订单12345",
+    "expected_route": "FAQ+action/-",
+    "expected_points": ["9:00", "已签收"],
+    "note": "FAQ+业务。整句相似度 0.850 会误命中并短路(旧行为静默丢掉订单查询);逐子句判据下 FAQ 那半入账、余下交路由。两个要点各来自一半"
+  },
+  {
+    "id": "faqmix-02",
+    "category": "faq_mixed",
+    "input": "周末开门吗,另外冷却液多久换一次",
+    "expected_route": "FAQ+qa/knowledge",
+    "expected_points": ["周日休息", "3年"],
+    "note": "FAQ+手册。附带回归:整句交给路由时'周末开门吗'曾被误判成 action(营业时间不在手册也不在工具里,两边都答不了),只交未覆盖子句才对"
+  },
+  {
+    "id": "faqmix-03",
+    "category": "faq_mixed",
+    "input": "你们几点开门,电话是多少",
+    "expected_route": "FAQ",
+    "expected_points": ["9:00", "400"],
+    "note": "两个子句各自命中【不同】FAQ,应全覆盖短路并把两条答案都返回。旧实现只返最佳单条,电话那半会漏"
+  },
+  {
+    "id": "faqmix-04",
+    "category": "faq_mixed",
+    "input": "请问一下,你们几点开门",
+    "expected_route": "FAQ",
+    "expected_points": ["9:00"],
+    "note": "礼貌前缀。不做规范化就会被切成['请问一下','你们几点开门'],前者对 FAQ 仅 0.71 → 整句被踢出短路 → 兜底路径按'不知道就说不知道'答不出来。测 _POLITE_PREFIX 剥离"
+  },
+  {
+    "id": "faqmix-05",
+    "category": "faq_mixed",
+    "input": "你们几点开门帮我查下订单12345",
+    "expected_route": "FAQ+action/-",
+    "expected_points": ["9:00", "已签收"],
+    "note": "【已知上限,预期失败】完全无分隔符(不打标点、不空格、不换行)→ 切不开 → 整句 0.81 仍会短路,订单查询仍被丢。彻底解法是把 FAQ 降级到 intent 级(见 TODO),代价是每次先付一次路由调用。留此用例量化缺口,不藏"
+  },
+  {
+    "id": "faqmix-06",
+    "category": "faq_mixed",
+    "input": "你们几点开门 帮我查下订单12345",
+    "expected_route": "FAQ+action/-",
+    "expected_points": ["9:00", "已签收"],
+    "note": "空格分隔(用户不打标点时的常见写法)。空格只在【两侧都是汉字】时才当分隔符——无条件切会把'Ninja 400''NGK CPR8EA-9'这类型号撕开,连带打碎 5 条 compatibility 用例。此用例守住这个平衡:换行同理"
+  },
+  {
+    "id": "mi-05",
+    "category": "multi_intent_control",
+    "input": "你们修得太差了我很不满意,顺便帮我查下订单12346",
+    "expected_route": "complaint",
+    "expected_points": [],
+    "note": "【投诉优先探针】情绪双层拦截在 decide_route【之前】,命中即单路返回,根本进不到多意图拆分。所以'投诉+业务'不会并行——这是设计(先安抚转人工)不是缺陷,用例把这个边界钉住"
   }
 ]

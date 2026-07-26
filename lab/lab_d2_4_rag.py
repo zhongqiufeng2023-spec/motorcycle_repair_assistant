@@ -5,6 +5,7 @@ from FlagEmbedding import BGEM3FlagModel
 import chromadb
 
 load_dotenv()
+MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 
 client_llm = OpenAI(api_key=os.environ.get("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com",
@@ -43,7 +44,7 @@ def rag_answer(question: str):
 {question}"""
 
     resp = client_llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages = [{"role":"user", "content":prompt}] 
     )
     return resp.choices[0].message.content, contexts

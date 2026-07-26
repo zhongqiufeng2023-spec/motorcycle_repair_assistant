@@ -1,11 +1,12 @@
-import os, sys, json, uuid
+import os, sys, json, uuid, time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.moto_manual import DOCS
 from dotenv import load_dotenv
 from openai import OpenAI
 from typing import TypedDict, Optional
-from app.query_processing import RouteDecision
-from app.query_processing import detect_complaint, judge_complaint, check_faq, decide_route, decompose_query, generate_hyde, rewrite_with_history
+from app.config import MODEL
+from app.query_processing import RouteDecision, Intent
+from app.query_processing import detect_complaint, judge_complaint, match_faq, decide_route, decompose_query, generate_hyde, rewrite_with_history
 from app.retriever import HybridRetriever
 from app.graph_retriever import GraphRetriever
 from langgraph.graph import StateGraph, END
@@ -36,15 +37,38 @@ retriever = HybridRetriever(MANUAL_CHUNKS + DOCS, chroma_path = os.path.join(BAS
 graphretriever = GraphRetriever()
 _ROLE_MAP = {"human": "user", "ai": "assistant"}
 
+def _add_answers(old: Optional[list], new: Optional[list]) -> list:
+    """answers 的 reducer:追加,但 new 传 None 表示【清空】。
+
+    为什么不能直接用 operator.add:state 是按 thread 存的,累加器跨轮永不清零。
+    第二轮进 merge 时 parts 里还躺着第一轮的答案 → len(parts)==1 不成立 → 白白走了
+    _merge_reply,把上一轮的答案跟这一轮缝成一段(实测:multiturn-02#t2 的答案里
+    含着 t1 的查询回执原文)。chitchat_node 的 `if state.get("answers")` 守卫同样受害:
+    第二轮一进来就为真,那一轮直接不回答。
+    累加器的生命周期必须是【一轮】,而不是【一个 thread】——由 merge_node 消费完就清。"""
+    if new is None:
+        return []
+    return (old or []) + new
+
+def _merge_error(old: Optional[str], new: Optional[str]) -> Optional[str]:
+    """多意图并行时 qa 和 action 可能同一轮各自失败,两个写入者抢 error 会 InvalidUpdateError。
+    给它一个 reducer:非空的拼起来,都空则 None。"""
+    parts = [x for x in (old, new) if x]
+    return " | ".join(parts) if parts else None
+
 class AgentState(TypedDict):
     messages: Annotated[list,add_messages]
-    question: str                        # 用户问题(入口塞进来)
+    question: str                        # 用户问题(入口塞进来,永远是完整原句)
     decision: Optional[dict]    # supervisor 的决策
     contexts: list[str]                  # 检索到的资料
-    answer: str                          # 最终答案
+    # 各分支往里【追加】自己那段答案(多意图时会有多条);reducer 让并行写入不打架。
+    # 每条形如 {"target": "qa"/"action"/..., "text": "..."} —— 带上 target 是为了让
+    # merge 认得出哪段是【业务回执】(不可改写),哪段是信息性回答(可润色)。
+    answers: Annotated[list[dict], _add_answers]
+    answer: str                          # 最终成品答案(只有 merge_node 写,一个字段一个写入者)
     route: str                           # 走过的路线(调试/评估用)
     cypher: Optional[str]           # 图检索溯源
-    error: Optional[str]            # 失败详情(别吞错误,你上次的教训)
+    error: Annotated[Optional[str], _merge_error]   # 失败详情(别吞错误,你上次的教训)
     sub_questions: Optional[list[str]]
     session_id: Optional[str]            # 入口塞进来=thread_id;开退款工单时注入给 request_refund
     user_id: Optional[str]               # 登录用户 id(FastAPI 验 JWT 后注入);开工单绑到谁、谁能查
@@ -64,7 +88,7 @@ def _generate(question: str, contexts: list[str], source: str = "维修手册") 
 【用户问题】
 {question}
 """
-    resp = llm.chat.completions.create(model="deepseek-chat",
+    resp = llm.chat.completions.create(model=MODEL,
         messages=[{"role": "user", "content": prompt}])
     return resp.choices[0].message.content
 
@@ -79,7 +103,7 @@ def _reflect_on_failure(tool_name: str, args: dict, error: str, question: str) -
     - 若能修复(如参数格式不对):给出具体修正方式,例如"订单号可能含多余字符，比如：！,@,#,￥,%,……,&,*,（,）,—,—,+,-,=,？,‘,’,【,】,!,@,#,$,%,^,&,*,(,),_,+,-,=,?,,,.,;,',:,",应尝试 12345"
     - 若该换别的工具:说明换哪个
     - 若无法修复(如订单确实不存在、超出政策):回答"无法修复:"加原因,此时不应重试"""
-    resp = llm.chat.completions.create(model="deepseek-chat",
+    resp = llm.chat.completions.create(model=MODEL,
         messages=[{"role": "user", "content": prompt}], temperature=0)
     return resp.choices[0].message.content.strip()
 
@@ -92,12 +116,12 @@ def _chitchat_reply(question: str, history: list[dict] | None = None) -> str:
              "回复简短,用简体中文。"}]
     # _history 的末条就是本轮问题;没有历史时退化成只带当前问题
     msgs += history if history else [{"role": "user", "content": question}]
-    resp = llm.chat.completions.create(model="deepseek-chat", messages=msgs)
+    resp = llm.chat.completions.create(model=MODEL, messages=msgs)
     return resp.choices[0].message.content
 
 def _complaint_reply(question: str) -> str:
     """投诉:先安抚,不辩解不甩参数,告知转人工"""
-    resp = llm.chat.completions.create(model="deepseek-chat",
+    resp = llm.chat.completions.create(model=MODEL,
         messages=[{"role": "user", "content": f"""你是摩托车店的客服主管。用户正在投诉,请用真诚、简短的话安抚他。
     不要辩解,不要甩技术参数,表达歉意,并告知已为他登记工单,人工客服会尽快跟进。
     用简体中文回复,不要夹杂英文单词。
@@ -115,34 +139,75 @@ def _history(state: AgentState, n: int = 10) -> list[dict]:
         out.append({"role":role,"content":m.content})
     return out
 
-def _final(answer: str, **extra) -> dict:
-    """终局补丁:答案 + 记入对话史"""
-    return {"answer": answer, "messages": [{"role": "assistant", "content": answer}], **extra}
-        
+def _final(answer: str, target: str, **extra) -> dict:
+    """分支终局补丁:把自己那段答案【追加】进 answers,连同 target 一起(merge 靠它区分回执与信息)。
+    注意这里【不再记 messages】——多意图时两个分支各记一条,一轮问答会留下两条助手消息,
+    历史就脏了。记账统一挪到 merge_node:谁产出【最终】答案谁记账。"""
+    return {"answers": [{"target": target, "text": answer}], **extra}
+
+def _route_str(d: RouteDecision) -> str:
+    """路线字符串。单意图时必须与改造前【逐字节一致】,否则 43 条评估集的
+    expected_route 精确比对会全红,而那跟新功能无关。多意图才用 + 连接。"""
+    return "+".join(f"{i.target}/{i.strategy or '-'}" for i in d.intents)
+
+def _my_question(state: AgentState, target: str) -> str:
+    """取【本路】要处理的那半句。
+    单意图时直接返回原句,不读 intent.question —— 这样即便 LLM 没听话、擅自精简了
+    question,单意图路径也零扰动,评估基线稳如改造前。多意图才按 target 各取各的。"""
+    intents = state["decision"]["intents"]
+    # FAQ 部分命中时,交给路由的只是【剩下的子句】,原句里那半已由 FAQ 答过。
+    # 此时"原句"不再是这一路该处理的东西,基准要换成 routed_question,否则分支会
+    # 把 FAQ 已答的那半再答一遍(而它没有 FAQ 数据,只能说"没查到")。
+    base = state["decision"].get("routed_question") or state["question"]
+    if len(intents) <= 1:
+        return base
+    for i in intents:
+        if i["target"] == target:
+            return i["question"]
+    return base
+
 def supervisor_node(state : AgentState) -> dict:
     q = state["question"]
     if detect_complaint(q) and judge_complaint(q):
-        return {"decision": RouteDecision(target = "complaint").model_dump(),"route": "complaint"}
-    faq = check_faq(q)
-    if faq:
-        return _final(faq,decision=RouteDecision(target="chitchat").model_dump(), route="FAQ")
-    d = decide_route(q, _history(state)[:-1])
-    return {"decision": d.model_dump(), "route": f"{d.target}/{d.strategy or '-'}"}
+        d = RouteDecision(intents=[Intent(target="complaint", question=q)])
+        return {"decision": d.model_dump(), "route": "complaint"}
+    # FAQ 逐子句匹配,三种结果三种处置(判据与代价见 query_processing.match_faq)
+    faq_hits, rest = match_faq(q)
+    if faq_hits and not rest:
+        # ① 全覆盖:短路,零 LLM 调用 —— FAQ 缓存的本职,成本分层的第一层
+        d = RouteDecision(intents=[Intent(target="chitchat", question=q)])
+        return _final("\n".join(faq_hits), "chitchat", decision=d.model_dump(), route="FAQ")
+
+    # 只在【FAQ 部分命中】时才把问题换成 rest(摘掉已答子句);一条都没命中就原句照送。
+    # 不能写成 `rest or q`:全不命中时 rest 是"所有子句用逗号重拼",标点被归一、礼貌前缀被剥,
+    # 等于悄悄改了【全部非 FAQ 用例】送进路由的文本——那不在这次改动的意图里。
+    d = decide_route(rest if faq_hits else q, _history(state)[:-1])
+    dd = d.model_dump()
+    patch = {"decision": dd, "route": _route_str(d)}
+    if faq_hits:
+        # ② 部分覆盖:FAQ 那段先入账当一路答案(merge 会和分支答案缝在一起),
+        # 只把【未覆盖的子句】交给路由 —— 既不丢 FAQ 的答案,也不让分支去答它答不了的半句。
+        dd["routed_question"] = rest
+        patch["answers"] = [{"target": "chitchat", "text": "\n".join(faq_hits)}]
+        patch["route"] = "FAQ+" + patch["route"]
+    return patch
+    # ③ 全不覆盖:照常走路由(patch 里没有 answers,route 就是纯路线串)
 
 def qa_node(state: AgentState) -> dict:
-    strategy = state["decision"]["strategy"]
-    q = rewrite_with_history(state["question"], _history(state))
+    intents = state["decision"]["intents"]
+    strategy = next((i["strategy"] for i in intents if i["target"] == "qa"), None)
+    q = rewrite_with_history(_my_question(state, "qa"), _history(state))
     if strategy == "knowledge":
         # 普通知识问题:直接混合检索 → 生成
         contexts = retriever.retrieve(q, top_k=3)
-        return _final(_generate(q, contexts), contexts = contexts)
+        return _final(_generate(q, contexts), "qa", contexts = contexts)
     if strategy == "compatibility":
         result = graphretriever.retrieve(q)
         if not result["ok"]:
-            return _final("抱歉,查询配件图谱时出错了,换个说法再试试?", contexts = [], cypher= result.get("cypher"), error = result.get("error"))
+            return _final("抱歉,查询配件图谱时出错了,换个说法再试试?", "qa", contexts = [], cypher= result.get("cypher"), error = result.get("error"))
         contexts = [str(row) for row in result["rows"]]
         source="配件兼容知识图谱的查询结果(每一行都是与用户问题匹配的兼容记录)"
-        return _final( _generate(q, contexts,source = source), contexts = contexts, cypher = result["cypher"])
+        return _final( _generate(q, contexts,source = source), "qa", contexts = contexts, cypher = result["cypher"])
 
     # 复杂问题:先改写,再检索
     # 策略1:先拆解成子问题
@@ -150,12 +215,16 @@ def qa_node(state: AgentState) -> dict:
     # 策略2:每个子问题用HyDE生成诱饵,分别检索,汇总资料
     all_contexts = []
     for sub_q in sub_questions:
+        t0 = time.perf_counter()
         hyde = generate_hyde(sub_q)
-        ctxs = retriever.retrieve(hyde, top_k=2)   # 每个子问题少取几条,避免总量爆炸
+        t1 = time.perf_counter()
+        ctxs = retriever.retrieve(hyde, top_k=2)
+        t2 = time.perf_counter()
+        print(f"[{sub_q[:20]}] hyde={t1-t0:.2f}s retrieve={t2-t1:.2f}s")
         all_contexts.extend(ctxs)
     # 去重(不同子问题可能检索到同一条)
     all_contexts = list(dict.fromkeys(all_contexts))
-    return _final(_generate(q, all_contexts), contexts = all_contexts, sub_questions = sub_questions)
+    return _final(_generate(q, all_contexts), "qa", contexts = all_contexts, sub_questions = sub_questions)
 
 
 # ask_user 不是业务工具,是"LLM 想问真人"的本地信号:无函数体,action_node 拦下来触发 interrupt。
@@ -181,7 +250,13 @@ def _tool_schemas() -> list:
 
 
 def action_node(state: AgentState) -> dict:
-    q = state["question"]
+    q = _my_question(state, "action")
+    hist = _history(state)
+    # 多意图时,把历史末条(=本轮完整原句)换成【属于 action 的那半句】。
+    # 不换的话 LLM 会连带回应"问火花塞"那半 —— 而它手里没有手册工具,只能编。
+    # 单意图时 q 恒等于原句,这里是恒等操作,对 43 条基线零扰动。
+    if hist and hist[-1]["role"] == "user":
+        hist[-1] = {"role": "user", "content": q}
     messages = [
         {"role": "system", "content": "你是摩托车店的业务办理助手。只能通过提供的工具办理业务,工具没覆盖的业务如实说明办不了。"
             "【关键机制】你无法直接用文字向用户提问或索取信息——唯一能向用户要信息的方式是调用 ask_user 工具。"
@@ -190,16 +265,16 @@ def action_node(state: AgentState) -> dict:
             "工具返回失败时(如超过退款期限、订单不存在),必须如实、明确地告诉用户失败的具体原因和结论"
             "(例:'很抱歉,该订单已签收超过 7 天,超出无理由退款期,无法办理退款');"
             "严禁声称任何没有真实发生的动作——不要说'已登记工单''已转人工''专人会联系您',除非工具确实返回了工单号或转接信息。"
-            "不要编造任何工具没有返回的信息。用简体中文回复。"},] + _history(state)
+            "不要编造任何工具没有返回的信息。用简体中文回复。"},] + hist
     fail_count = 0
     opened_ticket_id = None                 # 本轮若开了退款工单,记下单号,终局带给前端
     for _ in range(5):
         resp = llm.chat.completions.create(
-            model = "deepseek-chat",messages = messages, tools = _tool_schemas(), temperature = 0
+            model = MODEL,messages = messages, tools = _tool_schemas(), temperature = 0
         )
         msg = resp.choices[0].message
         if not msg.tool_calls:
-            return _final(msg.content, ticket_id=opened_ticket_id)
+            return _final(msg.content, "action", ticket_id=opened_ticket_id)
         messages.append(msg)
 
         for tc in msg.tool_calls:
@@ -230,24 +305,77 @@ def action_node(state: AgentState) -> dict:
                 if fail_count>=3:
                     # 带上 ticket_id:复合请求里退款可能已开单成功、后一个工具才连败转人工。
                     # 不带出去 = 一张真实存在的工单前端不知道去轮询,商家批复结果永远推不回来。
-                    return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。",
+                    return _final("抱歉,该业务多次尝试仍未成功,已为您登记并转人工客服优先处理。", "action",
                                   ticket_id=opened_ticket_id, error = f"连续失败{fail_count}次,已转人工" )
                 advice = _reflect_on_failure(tc.function.name, args, result.get("error",""),q)
                 messages.append({"role": "user","content": f"【系统反思】工具 {tc.function.name} 调用失败。分析建议:{advice}。""若建议可执行,请修正后重试;若无法修复,请如实向用户说明,不要再重试。"})
-    return _final("抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。", ticket_id=opened_ticket_id)
+    return _final("抱歉,这项业务办理遇到问题,已为您登记并转人工客服跟进。", "action", ticket_id=opened_ticket_id)
 
 
 def chitchat_node(state: AgentState) -> dict:
-    if state.get("answer"):   # FAQ 已经给过答案,别覆盖
+    # 守卫:只有 FAQ【全覆盖短路】时 supervisor 已经把答案给全了,这一路不该再答。
+    # 判据必须是 route=="FAQ" 而不是"answers 非空"——FAQ【部分覆盖】时 answers 也非空,
+    # 但那一段答的是另外的子句,本路仍有自己的半句要答,拿 answers 当守卫会让它闭嘴。
+    if state.get("route") == "FAQ":
         return {}
-    return _final(_chitchat_reply(state["question"], _history(state)))
+    return _final(_chitchat_reply(_my_question(state, "chitchat"), _history(state)), "chitchat")
 
 def complaint_node(state: AgentState) -> dict:
-    return _final( _complaint_reply(state["question"]))
+    return _final(_complaint_reply(state["question"]), "complaint")
 
-def route_by_decision(state: AgentState) -> str:
-    """条件边:读公文包,报下一站的名字"""
-    return state["decision"]["target"]
+
+def _merge_reply(parts: list[dict]) -> str:
+    """把多路答案缝成一段话。
+    铁律:【业务回执不可改写】—— qa 那半是只读信息,润色无所谓;action 那半是回执,
+    事情已经真实发生了(工单开了、槽位占了)。让 LLM 重写回执,用户看到的就可能
+    和系统实际做的对不上。所以回执原文保留,只让它润色信息段 + 写衔接。
+    (结构化事实如 ticket_id 走 State 字段透传,一个字都不进这里。)"""
+    receipts = [p["text"] for p in parts if p["target"] == "action"]
+    infos    = [p["text"] for p in parts if p["target"] != "action"]
+    prompt = f"""把下面两部分内容合并成一段自然、连贯的客服回复,用简体中文。
+
+    【必须原样保留、一个字都不许改写的业务办理回执】
+    {chr(10).join(receipts) if receipts else "(无)"}
+
+    【可以润色改写的信息性回答】
+    {chr(10).join(infos) if infos else "(无)"}
+
+    要求:
+    - 回执部分原样输出,不得改写、不得省略、不得增补任何未发生的动作。
+    - 信息部分可以精简润色,去掉重复的客套。
+    - 两部分之间加自然的过渡,合成一段完整回复;不要用小标题、不要分点罗列。
+    - 不要提及"两部分""系统""合并"之类的元信息。"""
+    resp = llm.chat.completions.create(model=MODEL,
+        messages=[{"role": "user", "content": prompt}], temperature=0)
+    return resp.choices[0].message.content
+
+
+def merge_node(state: AgentState) -> dict:
+    """汇总节点:所有分支的唯一出口。也是【本轮对话记账的唯一地点】。
+    单路时直接透传,不调 LLM —— 否则 43 条单意图用例每条白白多花一次调用 + 两秒延迟。"""
+    parts = state.get("answers") or []
+    if not parts:
+        final = "抱歉,没能处理您的问题,请换个说法再试试。"
+    elif len(parts) == 1:
+        final = parts[0]["text"]
+    else:
+        final = _merge_reply(parts)
+    # answers=None 清空累加器:它只服务【这一轮】的扇入,消费完就还原,不许带进下一轮。
+    return {"answer": final, "messages": [{"role": "assistant", "content": final}],
+            "answers": None}
+
+
+def route_by_decision(state: AgentState) -> list[str]:
+    """条件边:读公文包,报下一站的名字。
+    返回【列表】= 同一超步内并行激活多个节点(多意图时 qa 和 action 一起跑)。
+    去重是防御性的:按 prompt 判据同一处理单元应合并成一个 intent,真出现重复
+    target 也不该让同一个节点被激活两次。"""
+    seen, out = set(), []
+    for i in state["decision"]["intents"]:
+        if i["target"] not in seen:
+            seen.add(i["target"])
+            out.append(i["target"])
+    return out
 
 graph = StateGraph(AgentState)
 graph.add_node("supervisor", supervisor_node)
@@ -255,12 +383,16 @@ graph.add_node("qa",qa_node)
 graph.add_node("action", action_node)
 graph.add_node("chitchat", chitchat_node)
 graph.add_node("complaint", complaint_node)
+graph.add_node("merge", merge_node)
 
 graph.set_entry_point("supervisor")
+# 条件边返回【列表】→ 多意图时同一超步并行激活多个分支(扇出)
 graph.add_conditional_edges("supervisor", route_by_decision,
     {"qa": "qa", "action": "action", "chitchat": "chitchat", "complaint": "complaint"})
+# 四路统一汇入 merge(扇入),再到 END。merge 是答案与记账的唯一出口。
 for n in ["qa", "action", "chitchat", "complaint"]:
-    graph.add_edge(n, END)
+    graph.add_edge(n, "merge")
+graph.add_edge("merge", END)
 
 app_graph = graph.compile(checkpointer=MemorySaver())
 

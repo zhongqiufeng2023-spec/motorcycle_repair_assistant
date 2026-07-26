@@ -1,4 +1,7 @@
-import os, json
+import os, sys, json, re
+# 直跑(python app/query_processing.py)时项目根不在 sys.path,下面的 app.config 会 import 失败。
+# 补一行引导,让「直跑」和「作为包被 import」两种启动方式都成立(坑 7)。
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 from openai import OpenAI
 from FlagEmbedding import BGEM3FlagModel
@@ -6,6 +9,7 @@ import numpy as np
 from typing import Literal, Optional
 from pydantic import BaseModel, ValidationError
 from langsmith.wrappers import wrap_openai
+from app.config import MODEL
 
 load_dotenv()
 llm = wrap_openai(OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url = os.getenv("BASE_URL")))
@@ -69,7 +73,7 @@ def judge_complaint(question: str) -> bool:
     用户的话:{question}
     回答(yes/no):"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
@@ -77,9 +81,19 @@ def judge_complaint(question: str) -> bool:
     return resp.choices[0].message.content.strip().lower().startswith("yes")
 
 # ==================== 路由决策 ====================
-class RouteDecision(BaseModel):
+class Intent(BaseModel):
+    """一个处理单元要办的一件事。
+    question 是【这一路要处理的那半句】——单意图时就是完整原句,多意图时是切开的一半。
+    切开是必需的:若两路都收到整句"问火花塞+约保养",qa 生成时会看到"帮我预约"
+    而尴尬地一并回应,产出一个假装办了预约的答案。"""
     target: Literal["qa", "action", "chitchat", "complaint"]
     strategy: Optional[Literal["knowledge", "compatibility", "diagnosis"]] = None
+    question: str
+
+class RouteDecision(BaseModel):
+    """一次路由的完整决策。intents 通常只有一个;只有当用户提出的多件事
+    【分属不同处理单元】时才会有多个(如"查火花塞参数"+"约保养")。"""
+    intents: list[Intent]
 
 def decide_route(question: str, history: list[dict] | None = None) -> RouteDecision:
     # 有历史才注入:让路由在多轮里读懂"是/12345/日期"这类只在上文成立的裸回复;
@@ -103,8 +117,24 @@ def decide_route(question: str, history: list[dict] | None = None) -> RouteDecis
     prompt = f"""你是摩托车售后客服系统的路由器。判断用户问题该交给哪个处理单元。
     以 JSON 返回,不要解释,不要 markdown 代码块。
 
-    返回格式:
-    {{"target": "qa" 或 "action" 或 "chitchat", "strategy": "knowledge" 或 "compatibility" 或 "diagnosis" 或 null}}
+    返回格式(intents 是数组,绝大多数情况只含 1 个元素):
+    {{"intents": [{{"target": "qa" 或 "action" 或 "chitchat",
+                   "strategy": "knowledge" 或 "compatibility" 或 "diagnosis" 或 null,
+                   "question": "这一路要处理的那半句"}}]}}
+
+    ★ 拆不拆的唯一判据:是否【分属不同处理单元】
+    - 用户提的多件事若属于【同一处理单元】,合并成【一个】intent,question 填完整原句。
+      例:"查一下订单12346到哪了,顺便约周日的保养" → 两件事都是 action,只返回 1 个 intent。
+         (办业务的单元自己会连着办多件事,拆开反而多余)
+    - 只有多件事【分属不同处理单元】时才拆成多个 intent,每个 intent 的 question
+      只写属于它的那半句。
+      例:"ninja400的火花塞是什么,帮我预约一下明天修车"
+         → [{{"target":"qa","strategy":"compatibility","question":"ninja400的火花塞是什么"}},
+            {{"target":"action","strategy":null,"question":"帮我预约一下明天修车"}}]
+    - 单纯描述故障现象(哪怕提到多个症状)属于【同一处理单元】,不拆。
+      例:"加速无力还异响" → 1 个 intent(qa/diagnosis),question 填原句。
+    - 只有 1 个 intent 时,question 必须【原样照抄用户问题】,一个字都不许精简或改写
+      (精简会丢掉"2020年""CPR8EA-9"这类检索锚点)。
 
     target 说明:
     - qa: 只读的信息查询,且答案在【手册/配件图谱/故障知识】里(查参数、查配件兼容、排查故障)。此时 strategy 必填。
@@ -132,27 +162,95 @@ def decide_route(question: str, history: list[dict] | None = None) -> RouteDecis
     用户问题:{question}
     JSON:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
     text = resp.choices[0].message.content.strip().replace("```json", "").replace("```", "").strip()
     try:
-        return RouteDecision.model_validate_json(text)
+        d = RouteDecision.model_validate_json(text)
+        if not d.intents:                      # 空数组能过 Pydantic 校验,但下游会拿到零条路
+            raise ValueError("intents 为空")
+        return d
     except (ValidationError, ValueError):
-        return RouteDecision(target="qa", strategy="knowledge")
+        # 兜底走 qa/knowledge(最安全:只读、有资料、不会误触发业务操作)
+        return RouteDecision(intents=[Intent(target="qa", strategy="knowledge", question=question)])
     
-def check_faq(question :str, threshold: float = 0.75) -> str | None:
-    q_vec = _embed_model.encode([question])['dense_vecs'][0]
+# 礼貌前缀:中文客服里是个【封闭且稳定】的小集合。剥掉它属于「规范化」——
+# 和 lowercase、去空白同类,不是又调一个阈值。
+# 不剥的代价是实测出来的:"请问一下,你们几点开门" 会被切成 ["请问一下", "你们几点开门"],
+# 而"请问一下"对 FAQ 的相似度 0.71 不达标 → 整句被踢出 FAQ 短路 → 兜底路径按
+# _chitchat_reply 的 prompt("历史里没有的就如实说不知道")只能答"不知道"。
+# 一个本该命中 FAQ 的正常问法,退化成答不出来。
+_POLITE_PREFIX = r"^(请问一下|麻烦问一下|麻烦问下|想问一下|想问下|打听一下|咨询一下|请教一下|请问|问一下|问下|你好|您好|哈喽|嗨)[,，。!！、:：\s]*"
 
-    # print("q_vec shape:", np.array(q_vec).shape)          # 期望 (dim,),比如 (1024,)
-    # print("faq_vec shape:", np.array(_faq_vectors[0]).shape)  # 也应是 (dim,)
-    # print("faq count:", len(_faq_vectors))
-    
-    best_sim, best = _max_similarity(q_vec, _faq_vectors)
-    if best_sim >= threshold:
-        return _faq_answers[best]
-    return None
+# 分句点:标点 + 高频连接词("另外/顺便/还有/此外/以及"后面通常正好跟着第二件事)
+# + 换行 + 【夹在汉字之间的】空格。
+# ⚠️ 单个空格【不能】无条件当分隔符:中文问句里的空格多半长在英文型号中间——
+#    "Ninja 400"、"DID 520"、"NGK CPR8EA-9"。无条件切会把 compatibility 用例连同
+#    整个图检索能力一起打碎("Ninja 400的火花塞" → ["Ninja","400的火花塞"])。
+#    用前后向断言限定"两侧都是汉字"才切:那才是人为停顿,型号里的空格至少有一侧是字母数字。
+_CLAUSE_SPLIT = (r"[,，。;；?？!！]|另外|顺便|还有|此外|以及|\n+"
+                 r"|(?<=[一-鿿])[ \t]+(?=[一-鿿])")
+
+
+def _subclauses(question: str) -> list[str]:
+    """把问句切成子句。切不出东西(无标点的整句)就退化成原句本身——
+    这保证了单句路径的行为与逐子句改造前【逐字节一致】。"""
+    q = re.sub(_POLITE_PREFIX, "", question.strip())
+    parts = [c.strip() for c in re.split(_CLAUSE_SPLIT, q) if c.strip()]
+    return parts or [question.strip()]
+
+
+def check_faq(question: str, threshold: float = 0.75) -> str | None:
+    """FAQ 语义缓存。命中返回答案(可能是多条拼接),未命中返回 None。
+
+    判据:**只有当每一个子句都被 FAQ 覆盖时,才允许 FAQ 短路整句。**
+
+    为什么不能拿整句比(2026-07-26 修的真 bug):FAQ 短路发生在 decide_route【之前】,
+    一命中就直接返回,多意图拆分根本没机会执行。而整句 encode 会把两件事揉进一个向量,
+    实测"你们几点开门,顺便帮我查下订单12345"整句相似度 0.850 ≥ 0.75 → 命中 → 短路,
+    **订单查询被静默丢弃**,而且答案读起来是完整一句话,用户根本察觉不到少了一半。
+
+    为什么不是"提高阈值"就完了:实测【应命中的改写单句最低 0.820,复合句最高 0.851】,
+    区间不只重叠、方向还反了(复合句分数高过改写单句),不存在可用阈值。根因是
+    **整体语义相似度这个信号压根不携带「这句话里有几件事」的信息**——它衡量"整体像不像"。
+    切成子句之后,信号维度才对上:每段各自纯粹,"有一段没人管"这个事实才显形。
+    (坑 4 的镜像:那次是选错了模型,这次是选错了信号维度。信号对了,正则就够,不需要模型。)
+
+    已知上限:依赖标点。"你们几点开门帮我查下订单12345"(完全不打标点)切不开,
+    整句 0.81 仍会短路 → 仍会丢第二问。彻底解法是把 FAQ 降级到 intent 级(见 TODO),
+    代价是每次都要先付一次路由 LLM 调用,当前不划算。
+    """
+    hits, rest = match_faq(question, threshold)
+    return "\n".join(hits) if hits and not rest else None
+
+
+def match_faq(question: str, threshold: float = 0.75) -> tuple[list[str], str]:
+    """逐子句匹配的底座。返回 (命中的 FAQ 答案去重列表, 未被覆盖的子句拼成的问句)。
+
+    三种结果,supervisor 分别处置:
+    - 全覆盖  (答案, "")      → 短路,零 LLM 调用(FAQ 缓存的本职)
+    - 部分覆盖 (答案, 余下问句) → FAQ 那段先入账当一路答案,余下问句交给路由拆意图,merge 缝合
+    - 全不覆盖 ([], 原句)      → 照常走路由
+
+    **"部分覆盖"这一支是必须的**(2026-07-26 实测):若命中的子句只是不再短路、答案却被丢掉,
+    "你们几点开门,顺便查下订单12345" 会被整句交给路由 → 营业时间那半落到检索路径上,
+    而营业时间不在手册里 → 答"没查到相关信息"。等于把"丢第二问"换成"第一问答错"。
+    只把【未覆盖的子句】交给路由,还顺带修了误路由:实测整句交路由时"周末开门吗"会被判成 action。
+    """
+    subs = _subclauses(question)
+    vecs = _embed_model.encode(subs)["dense_vecs"]
+    hits, rest = [], []
+    for sub, v in zip(subs, vecs):
+        sim, idx = _max_similarity(v, _faq_vectors)
+        if sim >= threshold:
+            hits.append(_faq_answers[idx])
+        else:
+            rest.append(sub)
+    # 多个子句各自命中不同 FAQ 时全部保留(去重保序)。只返最佳单条会漏:
+    # "你们几点开门,电话是多少" 两段都命中,却只答得出营业时间。
+    return list(dict.fromkeys(hits)), ",".join(rest)
 
 # ==================== 意图分类 ====================
 def classify_intent(question: str) ->str :
@@ -168,7 +266,7 @@ def classify_intent(question: str) ->str :
 用户问题:{question}
 类别:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
@@ -202,7 +300,7 @@ def rewrite_with_history(question: str, history: list[dict]) -> str:
 
     改写后的问题:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
@@ -217,7 +315,7 @@ def generate_hyde(question: str) -> str:
 问题:{question}
 假设性答案:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
     )
@@ -232,7 +330,7 @@ def decompose_query(question: str) -> list[str]:
 用户问题:{question}
 拆解结果:"""
     resp = llm.chat.completions.create(
-        model="deepseek-chat",
+        model=MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
     )
