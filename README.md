@@ -53,10 +53,10 @@
 **查询理解与动态路由(Query Understanding)**
 
 - FAQ 语义缓存 — BGE-M3 向量 + 余弦相似度匹配高频问题,命中直接返回,不消耗 LLM 调用;**按标点/连接词/换行逐子句匹配**,只有每个子句都被覆盖才短路整句(否则复合问句的第二问会被静默丢弃)
-- 意图分类 — LLM 零样本分类(temperature=0),将问题分流为 chitchat / knowledge / diagnosis 三类,带解析兜底
+- 路由决策 — 一次 LLM 调用(temperature=0)输出 `intents[]`,每个 intent 含处理单元 `target`(qa / action / chitchat)与检索策略 `strategy`(knowledge / compatibility / diagnosis),Pydantic Literal 校验 + 解析失败兜底走最安全的知识检索
 - HyDE(Hypothetical Document Embeddings)— 生成假设性答案作为检索"诱饵",拉近口语化提问与书面语料的语义距离
 - 子问题拆解 — 复合问题拆为独立子问题分别检索再汇总,JSON 解析失败自动降级为单一问题
-- 成本分层路由 — 按"FAQ 缓存 → 意图分类 → 按类分流"逐层拦截,每层用最低成本处理能处理的问题,把检索与查询改写留给真正需要的复杂问题
+- 成本分层路由 — 按"情绪拦截 → FAQ 缓存 → 路由决策 → 按 intent 分流"逐层拦截,每层用最低成本处理能处理的问题,把检索与查询改写留给真正需要的复杂问题
 
 **图检索(知识图谱)**
 
@@ -89,7 +89,16 @@
 **MCP(Model Context Protocol)**
 
 - FastMCP 工具服务器 — 业务工具经 `@mcp.tool` 以 MCP 协议暴露(类型标注自动生成 JSON Schema),业务逻辑与协议外壳分离
-- 动态发现 — MCP 客户端运行时经 `tools/list` 发现工具清单并 `tools/call` 调用,工具供给侧可独立演化(lab 验证,主流水线接入在 Roadmap)
+- 动态发现 — ActionAgent 运行时经 `tools/list` 发现工具清单(首个业务请求时懒加载缓存)并 `tools/call` 远程调用,工具供给侧可独立演化;工具服务已拆成独立进程(`tool-service/`,HTTP :9000),不与 Agent 同生共死
+- 同步/异步桥接 — `app/mcp_client.py` 把异步 fastmcp Client 桥成同步接口,使 LangGraph 的同步节点(以及 D8 验证过的 interrupt / Reflection 链路)不必为协议层改造成 async
+- 系统参数剥离 — MCP schema 下发给 LLM 前剥掉 `session_id` / `user_id`,由节点覆盖式注入后经协议透传:LLM 看不到也改不了工单归属
+
+**业务系统与前端(二期生产化)**
+
+- Spring Boot 3.4 + Spring Data JPA + PostgreSQL — 订单 / 保养槽位 / 退款工单入库,**业务规则的唯一权威**(Agent 侧只发起、不裁决);Service 接口化(interface + impl),`DataSeeder` 幂等灌种子
+- 退款工单状态机 — `request_refund` 开 PENDING 工单而非挂起对话,商家批复后由业务系统**无 LLM 确定性执行**;`SchemaGuards` 启动建**部分唯一索引**(`WHERE status='PENDING'`,精确表达"同订单同时只能有一张待审"而非"一辈子只能退一次")+ `open()` 幂等,防节点重放开出重复工单
+- Spring Security + JWT — 无状态鉴权(jjwt 0.12,BCrypt 存密码),用户 / 商家双角色授权矩阵(`GET /tickets`、`POST /tickets/*/decide` 限 MERCHANT);FastAPI 用**同一把密钥**验签取 `sub` 注入 State——两个后端不共享 session,共享的是密钥与算法
+- React 18 + Vite — 登录门 + 按角色分流:顾客聊天窗(澄清追问交互态、工单结果轮询回推)/ 商家审批控制台(待审列表 + 通过/驳回)
 
 **工程实践**
 
@@ -109,7 +118,7 @@
    └──► BM25 稀疏检索(关键词匹配)──┘
 ```
 
-## 架构:查询理解流水线(route_and_answer)
+## 架构:查询理解流水线(FAQ → 路由 → 分流)
 
 在混合检索之上增加一层**成本分层的查询理解与路由**:核心思想是每一层都用当前最低成本的手段拦截它能处理的问题,把昂贵的检索与查询改写留给真正需要的复杂问题。
 
@@ -195,7 +204,8 @@ GraphRetriever 与 HybridRetriever 保持一致:**只负责"检索出事实",不
 - Spring Boot 业务系统:订单 / 槽位 / 退款工单入 Postgres,业务规则唯一权威;Service 接口化 + DataSeeder 幂等种子(`business-system/`)
 - React 前端:用户聊天窗(含澄清追问 + 工单结果回推)+ 商家审批控制台(`frontend/`)
 - MCP 生产化:工具拆成独立进程(`tool-service/`,HTTP :9000),ActionAgent 经 `app/mcp_client.py`(async→sync 桥)动态发现 + 远程调用;系统参数(session_id / user_id)对 LLM 隐藏但穿透到底
-- 用户系统 + 鉴权:Spring Security + JWT(HS384,BCrypt 存密码)无状态鉴权,用户 / 商家双角色授权矩阵(商家端点 `GET /tickets`、`/decide` 限 MERCHANT);FastAPI 用同一把密钥验签取 `sub` 注入 state,退款工单绑 `user_id`;前端登录门 + 按角色分流页面
+- 用户系统 + 鉴权:Spring Security + JWT(BCrypt 存密码)无状态鉴权,用户 / 商家双角色授权矩阵(商家端点 `GET /tickets`、`/decide` 限 MERCHANT);FastAPI 用同一把密钥验签取 `sub` 注入 state,退款工单绑 `user_id`;前端登录门 + 按角色分流页面
+  > ⚠️ 已知坑:jjwt 的 `Keys.hmacShaKeyFor()` **按密钥字节长度隐式推导签名算法**(≥32B→HS256,≥48B→HS384),当前默认密钥 53 字节故实际走 HS384,而 `app/api.py` 把 `JWT_ALG` 写死成 `"HS384"`。换一个 32 字节的 `JWT_SECRET` 就会 Java 用 HS256 签、Python 只认 HS384,**全部请求 401 且报错不指向密钥长度**。待改为两端显式指定算法。
 - 多意图并行:路由输出 `intents[]`,条件边返回列表在同一超步**并行扇出**多个分支(线程池,IO 等待重叠),四路统一扇入 `merge` 缝合;合并时**业务回执一字不改**(工单已开、槽位已占,改写会让用户看到的与系统实际做的不符),仅润色信息段。拆不拆的判据是「是否分属不同处理单元」而非「用户说了几件事」(`app/agents.py`)
 - LLM 模型名集中配置:`app/config.py` 读 `.env` 的 `LLM_MODEL`,供应商改名/下线时只改一处(此前硬编码散落 26 处 / 15 个文件)
 
@@ -311,8 +321,10 @@ docker run -d --name moto-neo4j -p 7474:7474 -p 7687:7687 \
 python lab/lab_d5_2_import_csv.py
 
 # ③ Spring Boot 业务系统(:8080)—— 订单/槽位查询 + 退款工单状态机(业务规则唯一权威)
-#    需 JAVA_HOME 指向 JDK 17;首次可用 mvn 打包,之后跑 jar
-cd business-system && java -jar target/business-system-0.0.1.jar   # 或 mvn spring-boot:run
+#    需 JAVA_HOME 指向 JDK 17。首次先打包,之后直接跑 jar
+cd business-system
+mvn -DskipTests package                            # 首次(或改过 Java 代码后)
+java -jar target/business-system-0.0.1.jar         # 或开发期 mvn spring-boot:run
 cd ..
 
 # ④ MCP 工具服务(:9000)—— 业务工具经 MCP 独立进程暴露,Agent 远程发现+调用

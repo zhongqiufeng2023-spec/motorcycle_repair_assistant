@@ -6,7 +6,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.72,
+    "latency": 0.37,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -20,7 +20,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.36,
+    "latency": 0.24,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -34,7 +34,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.28,
+    "latency": 0.21,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -48,7 +48,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.37,
+    "latency": 0.23,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -62,14 +62,14 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 9.03,
+    "latency": 9.38,
     "clarifies": [
       "请问您想预约哪一天来做保养？"
     ],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已为您成功预约 **2026年7月20日** 的保养服务，请届时到店进行保养。如有其他需要，随时告诉我！"
+    "answer": "已为您成功预约 **2026年7月20日** 的摩托车保养服务，到时请按时到店做保养即可。如有其他需要，随时找我！"
   },
   {
     "id": "faqmiss-02",
@@ -78,12 +78,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": null,
-    "latency": 8.2,
+    "latency": 7.96,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": 3,
-    "answer": "已为您成功提交退款申请！\n\n**订单信息**：12345（NGK CPR8EA-9 火花塞）\n**退款原因**：不想要了\n**退款工单号**：3\n\n商家审核通过后会将退款返还给您，请留意通知。"
+    "answer": "已为您成功提交退款申请！\n\n**订单号：** 12345（NGK CPR8EA-9 火花塞）  \n**退款原因：** 不想要了  \n**退款工单号：** 3  \n\n商家审核后会通知您结果，请耐心等待，无需重复提交。"
   },
   {
     "id": "know-01",
@@ -92,12 +92,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 6.66,
+    "latency": 8.43,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "Ninja 400的标准火花塞电极间隙为0.8至0.9毫米。"
+    "answer": "火花塞电极间隙为0.8至0.9毫米。"
   },
   {
     "id": "know-02",
@@ -106,12 +106,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 10.35,
+    "latency": 16.12,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "对于川崎Ninja 400，放油螺栓的拧紧扭矩为 **29牛·米**。"
+    "answer": "请提供您的摩托车具体型号，以便给出准确的放油螺栓扭矩值。"
   },
   {
     "id": "know-03",
@@ -120,12 +120,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 6.85,
+    "latency": 6.81,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "冷却液建议每3年或更换水泵时更换。"
+    "answer": "根据维修手册，冷却液建议每3年或更换水泵时更换一次。"
   },
   {
     "id": "know-04",
@@ -134,12 +134,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 11.29,
+    "latency": 6.47,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据手册资料，建议如下：\n\n- Ninja 400：前轮 2.0 bar，后轮 2.25 bar（冷车状态，载人时后轮可适当提高）。\n- Yamaha MT-07：前轮 225 kPa（约 2.25 bar），后轮 250 kPa（约 2.50 bar）（冷胎气压）。"
+    "answer": "根据维修手册，Ninja 400的冷车轮胎气压建议为：前轮 2.0 bar，后轮 2.25 bar。载人时后轮可以适当提高。"
   },
   {
     "id": "know-05",
@@ -148,12 +148,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 8.47,
+    "latency": 16.33,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据 Kawasaki Ninja 400 车主手册，链条松紧度的标准值为 **20～30 mm**（0.8～1.2 英寸）。检查时支起中撑，在链条中段（发动机链轮与后轮链轮之间）上下晃动测量即可。"
+    "answer": "对于Kawasaki Ninja 400，标准链条松紧度为20–30毫米（中撑起车，链条中段上下晃动幅度）；对于Honda CBR650R，标准为25–35毫米。请根据你的车型参考对应数值。"
   },
   {
     "id": "know-06",
@@ -162,12 +162,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 7.88,
+    "latency": 10.58,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "刹车油使用DOT4规格，建议每两年更换一次。"
+    "answer": "刹车油规格为DOT4，建议每两年更换一次。"
   },
   {
     "id": "know-07",
@@ -176,12 +176,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 5.41,
+    "latency": 5.78,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "川崎 Ninja 400 的机油滤清器扭矩为 **17.5 N·m**。"
+    "answer": "机油滤清器的扭矩为 **17.5 N·m**。"
   },
   {
     "id": "comp-01",
@@ -190,12 +190,12 @@
     "got": "qa/compatibility",
     "route_ok": true,
     "hit": true,
-    "latency": 5.53,
+    "latency": 8.12,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "2020款Ninja 400适用的火花塞型号是 **NGK CPR8EA-9**（零件号：CPR8EA-9）。"
+    "answer": "根据您2020款Ninja 400的车型，适用的火花塞是 **NGK CPR8EA-9**（零件号：CPR8EA-9）。"
   },
   {
     "id": "comp-02",
@@ -204,12 +204,12 @@
     "got": "qa/compatibility",
     "route_ok": true,
     "hit": true,
-    "latency": 5.94,
+    "latency": 6.84,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "Ninja 400（2018-2023款）的火花塞型号为 **NGK CPR8EA-9**，零件号 **CPR8EA-9**。"
+    "answer": "Ninja 400的火花塞型号是 **NGK CPR8EA-9**（零件号 CPR8EA-9），适用于2018至2023年款。"
   },
   {
     "id": "comp-03",
@@ -218,12 +218,12 @@
     "got": "qa/compatibility",
     "route_ok": true,
     "hit": true,
-    "latency": 7.35,
+    "latency": 5.37,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据查询到的信息，NGK CPR8EA-9火花塞可适配以下车型：\n\n- **Kawasaki Z400**（2019–2023年款）\n- **Kawasaki Ninja 400**（2018–2023年款）"
+    "answer": "NGK CPR8EA-9火花塞可以适配以下车型：\n\n- Kawasaki Z400（2019-2023年款）\n- Kawasaki Ninja 400（2018-2023年款）"
   },
   {
     "id": "comp-04",
@@ -232,7 +232,7 @@
     "got": "qa/compatibility",
     "route_ok": true,
     "hit": true,
-    "latency": 7.37,
+    "latency": 7.19,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -246,12 +246,12 @@
     "got": "qa/compatibility",
     "route_ok": true,
     "hit": true,
-    "latency": 4.99,
+    "latency": 5.38,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "Yamaha MT-07（2014-2023年款）推荐使用DID 520链条，具体型号为520VX3。"
+    "answer": "根据资料，Yamaha MT-07（2014–2023年款）可选用**DID 520链条**，具体型号为**520VX3**。"
   },
   {
     "id": "diag-01",
@@ -260,7 +260,7 @@
     "got": "qa/diagnosis",
     "route_ok": true,
     "hit": null,
-    "latency": 20.73,
+    "latency": 17.12,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -274,7 +274,7 @@
     "got": "qa/diagnosis",
     "route_ok": true,
     "hit": null,
-    "latency": 10.96,
+    "latency": 11.25,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -288,12 +288,12 @@
     "got": "chitchat/-",
     "route_ok": true,
     "hit": null,
-    "latency": 4.02,
+    "latency": 3.19,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "不客气！有需要随时找我哦。"
+    "answer": "不客气，有什么需要随时找我！"
   },
   {
     "id": "chat-02",
@@ -302,12 +302,12 @@
     "got": "chitchat/-",
     "route_ok": true,
     "hit": null,
-    "latency": 3.6,
+    "latency": 2.25,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "在的呀！请问有什么可以帮您的吗？😊"
+    "answer": "在的你好！有什么可以帮您？😊"
   },
   {
     "id": "chat-03",
@@ -316,12 +316,12 @@
     "got": "chitchat/-",
     "route_ok": true,
     "hit": null,
-    "latency": 4.94,
+    "latency": 5.84,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "感谢您的认可！如果您方便的话，可以告诉我是哪位师傅为您服务的吗？"
+    "answer": "感谢您的认可！我们会继续努力提供更好的服务。有什么其他需要帮忙的吗？"
   },
   {
     "id": "complaint-01",
@@ -330,12 +330,12 @@
     "got": "complaint",
     "route_ok": true,
     "hit": null,
-    "latency": 3.56,
+    "latency": 4.26,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "非常抱歉，让您遇到这样的问题，是我们做得不够好。我已经为您登记了工单，会安排专人尽快联系您处理退款事宜。请放心。"
+    "answer": "非常理解您的心情，修了半天反而更糟，换谁都会生气。这事确实是我们没做好，我代表店里向您诚恳道歉。我已经帮您登记了工单，把情况详细记录好了，后续会有专人尽快联系您处理。请您放心，我们一定给您一个交代。"
   },
   {
     "id": "complaint-02",
@@ -344,12 +344,12 @@
     "got": "complaint",
     "route_ok": true,
     "hit": null,
-    "latency": 2.71,
+    "latency": 3.75,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "非常抱歉，让您白跑一趟，这完全是我们工作的失误，真的对不住。我已经为您登记了工单，专属客服会尽快联系您处理，请放心。"
+    "answer": "非常抱歉让您白跑一趟，这确实是我们工作的失误，真的对不住。我已经为您登记了工单，会有专人尽快联系您跟进处理，请您放心。"
   },
   {
     "id": "complaint-03",
@@ -358,12 +358,12 @@
     "got": "complaint",
     "route_ok": true,
     "hit": null,
-    "latency": 3.03,
+    "latency": 3.79,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "非常抱歉让您反复打电话却无人处理，这确实是我们的疏忽，给您添麻烦了。我已经为您登记了工单，人工客服会马上跟进，尽快帮您解决问题。"
+    "answer": "非常理解您的着急和不满，让您多次打电话却没有得到回应，这确实是我们的问题。我代表店里向您真诚道歉。\n\n我已经为您登记了专属的工单，会安排专人优先处理，尽快给您回电跟进。请您放心，这次不会再让您等待。"
   },
   {
     "id": "complaint-ctrl-01",
@@ -372,12 +372,12 @@
     "got": "qa/diagnosis",
     "route_ok": true,
     "hit": null,
-    "latency": 13.07,
+    "latency": 14.53,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "**手册里没有查到相关信息。**\n\n刹车突然失灵属于极危险情况，请立即执行以下安全操作：\n\n1.  **立即停车**：在安全前提下，利用发动机制动（降档）和驻车制动（如果后刹尚存）缓慢减速，寻找平坦安全区域停车。切勿惊慌急刹。\n2.  **切勿继续骑行**：在问题排除前绝对不要再启动车辆。\n3.  **初步检查**：停车后查看刹车油壶液位是否过低、管路是否有明显漏油痕迹。\n4.  **寻求专业维修**：联系专业摩托车维修人员或拖车至维修店进行全面检查，重点排查刹车油管破裂、卡钳活塞卡死、主泵失效或ABS泵故障。\n\n安全第一，请尽快处理。"
+    "answer": "手册里没有查到相关信息。建议立即停止骑行并联系专业维修人员检查刹车系统。"
   },
   {
     "id": "complaint-ctrl-02",
@@ -386,12 +386,12 @@
     "got": "qa/diagnosis",
     "route_ok": true,
     "hit": null,
-    "latency": 12.28,
+    "latency": 13.97,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "车辆异响的原因很多，根据您提供的信息，如果您的车是雅马哈MT-07，异响可能与**气门间隙**有关。手册指出，未调整的气门会导致发动机噪音、空燃比异常，甚至发动机损坏。建议在发动机冷态时，由专业技师检查并调整气门间隙。\n\n如果您的车型不是MT-07，以上信息可能不适用。建议提供具体车型和异响特征，以便进一步判断。"
+    "answer": "关于车辆异响问题，根据资料显示，未调整的阀门间隙可能导致发动机噪音（气门/阀门异响）。如果您的异响来自发动机区域，建议检查并调整气门间隙。其他类型的异响（如底盘、传动等）手册里没有查到相关信息。"
   },
   {
     "id": "action-01",
@@ -400,12 +400,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 4.34,
+    "latency": 5.22,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "您的订单 **12346** 商品为 **DID 520 链条**，目前状态是 **配送中**，正在路上，请您耐心等待。"
+    "answer": "订单 **12346** 查询结果如下：\n\n- **商品**：DID 520 链条\n- **物流状态**：配送中\n\n目前该订单正在配送途中，暂时没有更详细的物流轨迹信息。建议您后续留意物流更新。"
   },
   {
     "id": "action-02",
@@ -414,12 +414,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 4.13,
+    "latency": 4.35,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已成功为您预约 **2026-07-20** 的 **常规保养** 服务，请按时到店。祝您用车愉快！"
+    "answer": "已成功为您预约 **2026年7月20日** 的 **常规保养** 服务，请按时到店，谢谢！"
   },
   {
     "id": "action-03",
@@ -428,14 +428,14 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 16.07,
+    "latency": 15.24,
     "clarifies": [
-      "2026-07-18已约满，可选日期为2026-07-19或2026-07-20，请问您想预约哪一天？ 2026-07-19 2026-07-20"
+      "2026-07-18的保养已约满，您想预约7月19日还是7月20日？ 2026-07-19 2026-07-20"
     ],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已成功为您预约 **2026年7月19日** 的保养服务，请按时到店。如有其他需求，欢迎随时告诉我！"
+    "answer": "已成功为您预约 **2026年7月19日** 的保养服务，请按时到店。"
   },
   {
     "id": "action-04",
@@ -444,12 +444,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": null,
-    "latency": 8.5,
+    "latency": 8.27,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": 3,
-    "answer": "**订单 12345（NGK CPR8EA-9 火花塞）** 已成功提交退款申请。\n\n- **退款原因：** 买错型号了\n- **退款工单号：** 3\n- **处理进度：** 已提交至商家审核，审核通过后会通知您，请耐心等待。"
+    "answer": "已成功为您提交退款申请！\n\n**退款工单号：** 3  \n**退款原因：** 买错型号了  \n**订单商品：** NGK CPR8EA-9 火花塞\n\n商家审核后会通知您，请留意后续消息。无需重复提交。"
   },
   {
     "id": "action-05",
@@ -457,13 +457,13 @@
     "expected": "action/-",
     "got": "action/-",
     "route_ok": true,
-    "hit": true,
-    "latency": 6.65,
+    "hit": false,
+    "latency": 7.68,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "该订单（12347）购买的是 **DOT4 刹车油**，目前状态为**已签收**，但签收至今已 **15 天**，超过了 7 天的无理由退款期限，很抱歉，**无法办理退款**。"
+    "answer": "很抱歉，订单 12347（DOT4 刹车油）目前已签收 **15 天**，已超出签收后 **7 天内**的无理由退款期限，因此无法为您办理退款。"
   },
   {
     "id": "action-06",
@@ -472,12 +472,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 6.2,
+    "latency": 7.61,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "好的，两件事都办妥了，以下是结果：\n\n**1. 订单 12346 物流查询**\n- 商品：DID 520 链条\n- 状态：**配送中**，正在路上，请留意收货。\n\n**2. 预约保养**\n- 已成功为您预约 **2026 年 7 月 20 日** 的保养服务。\n\n还有其他需要帮忙的吗？"
+    "answer": "好的，两件事都办妥了，汇报如下：\n\n**1. 订单 12346 物流信息**\n- 商品：DID 520 链条\n- 当前状态：**配送中**\n\n**2. 保养预约**\n- 已成功为您预约 **2026 年 7 月 20 日** 的保养服务。\n\n请问还有其他需要帮忙的吗？"
   },
   {
     "id": "action-07",
@@ -486,12 +486,14 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 7.93,
-    "clarifies": [],
+    "latency": 10.37,
+    "clarifies": [
+      "请提供您的纯数字订单号（例如 123456），目前收到的\"12-345\"包含了非数字字符，无法直接查询。"
+    ],
     "stuck": null,
-    "unused_replies": 1,
+    "unused_replies": 0,
     "ticket_id": null,
-    "answer": "您查询的订单 **12345** 对应的商品为 **NGK CPR8EA-9 火花塞**，目前状态为 **已签收**，签收已有 **3 天**。\n\n请问还有其他需要帮忙的吗？"
+    "answer": "订单 **12345** 的查询结果如下：\n\n- **商品**：NGK CPR8EA-9 火花塞\n- **状态**：已签收\n- **签收天数**：3天\n\n目前订单已签收，请问还有什么需要我帮忙的吗？"
   },
   {
     "id": "multiturn-01#t1",
@@ -500,7 +502,7 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 6.97,
+    "latency": 6.46,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -514,12 +516,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 17.41,
+    "latency": 9.12,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据维修资料，不同车型的火花塞更换周期不同。例如，Ninja 400建议每12000公里检查更换，而Honda CBR650R建议每16000英里（约25600公里）更换。请以您自己车型的手册为准。"
+    "answer": "根据维修手册资料，Ninja 400 的火花塞建议每 12000 公里检查更换。"
   },
   {
     "id": "multiturn-02#t1",
@@ -528,12 +530,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 5.03,
+    "latency": 5.16,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "您的订单 **12345** 购买的商品是 **NGK CPR8EA-9 火花塞**，目前状态为 **已签收**，签收已有 **3天** 了。\n\n很抱歉，目前只能查到此订单的签收状态，没有更详细的物流轨迹信息。如果您已经收到货了，可以确认一下收货情况。如果还有什么需要我帮忙办理的（比如退款等），请告诉我。"
+    "answer": "订单 **12345** 查询结果如下：\n\n- **商品**：NGK CPR8EA-9 火花塞\n- **当前状态**：已签收（签收已有 3 天）\n\n该订单已在 3 天前完成签收，如果您需要办理退款等业务，可以告诉我。"
   },
   {
     "id": "multiturn-02#t2",
@@ -542,12 +544,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": null,
-    "latency": 7.43,
+    "latency": 6.27,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": 3,
-    "answer": "已为您成功提交退款申请，工单编号为 **3**。订单 **12345**（NGK CPR8EA-9 火花塞）的退款请求已发送给商家审核，商家审核通过后款项会原路返回，届时会通知您，请耐心等待。"
+    "answer": "已成功为您提交退款申请！\n\n- **订单号**：12345\n- **退款原因**：不想要了\n- **退款工单号**：3\n\n商家审核通过后会通知您，请留意消息。"
   },
   {
     "id": "multiturn-03#t1",
@@ -556,14 +558,14 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 14.86,
+    "latency": 16.41,
     "clarifies": [
-      "2026-07-18 保养已约满，可约日期为 2026-07-19 和 2026-07-20，请问您想改约哪一天？ 2026-07-19 2026-07-20"
+      "2026-07-18已约满，可约日期为7月19日或7月20日，请问您想预约哪一天？ 2026-07-19 2026-07-20"
     ],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已成功为您预约 **2026-07-19** 的保养服务，请按时到店。祝您用车愉快！"
+    "answer": "已成功为您预约 **2026年7月19日** 的保养服务，请按时到店。"
   },
   {
     "id": "multiturn-03#t2",
@@ -572,12 +574,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 8.09,
+    "latency": 7.9,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "很抱歉，我无法直接为您修改预约日期，目前系统没有提供修改或取消预约的功能。建议您如果需要更改日期，可以到门店现场协调处理。"
+    "answer": "很抱歉，我目前没有修改或取消已预约服务的功能，无法将预约日期从18日/19日改为20日。这个业务我办不了。"
   },
   {
     "id": "conflict-01",
@@ -586,12 +588,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 5.98,
+    "latency": 7.87,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "Ninja 400的机油容量根据是否更换机油滤清器有所不同：  \n- 不更换机油滤清器时：约1.6升  \n- 更换机油滤清器时：约2.0升"
+    "answer": "Ninja 400的机油容量根据是否更换机油滤清器有所不同：\n\n- **不更换机油滤清器**：约 **1.6 升**（1.7 US qt）\n- **更换机油滤清器**：约 **2.0 升**（2.1 US qt）\n\n请根据实际保养操作选择对应加注量。"
   },
   {
     "id": "know-08",
@@ -600,12 +602,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 6.78,
+    "latency": 8.78,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据维修手册，Ninja 400 推荐使用 **10W-40 或 10W-50** 规格的四冲程摩托车专用机油。"
+    "answer": "对于川崎 Ninja 400，推荐使用 **10W-40** 或 **10W-50** 规格的四冲程摩托车专用机油。"
   },
   {
     "id": "diag-03",
@@ -614,12 +616,12 @@
     "got": "qa/diagnosis",
     "route_ok": true,
     "hit": null,
-    "latency": 14.18,
+    "latency": 18.87,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "根据维修手册中的信息，跑起来车头发抖且过减速带更明显，通常与以下因素有关：\n\n1. **转向系统**：检查转向是否松动，确认车把转动灵活且没有间隙。转向间隙过大会导致车辆行驶中方向不稳，尤其在颠簸时更明显。\n2. **轮胎状况**：检查轮胎的磨损情况、胎压是否正常，以及车轮动平衡是否良好。轮胎失衡或胎压异常会引起高速抖动，过减速带时冲击会使抖动加剧。\n\n建议重点检查上述两项，如果问题持续，可能还涉及前悬挂（如前叉减震器）或轮毂变形，但手册中未直接提及，建议到专业维修点进一步排查。"
+    "answer": "根据手册中的信息，车头发抖可能由以下原因引起：  \n- **转向松动**：检查车把转向是否自由但有间隙，若转向松动可能导致失控和抖动。  \n- **轮胎不平衡**：高速行驶和过减速带时，轮胎失衡会加剧抖动，建议检查轮胎状况、气压和轮毂平衡。  \n\n过减速带时抖动更明显，也可能与前减震器或悬挂系统有关，但手册中未涉及具体内容。建议优先检查上述两项。"
   },
   {
     "id": "action-08",
@@ -628,12 +630,12 @@
     "got": "action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 6.41,
+    "latency": 6.94,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "很抱歉，订单号 **99999** 在系统中不存在，无法查询到相关信息。请您检查一下订单号是否正确，比如是否有多余的字符、少位或输入有误，确认后我可以再次为您查询。"
+    "answer": "很抱歉，查询结果显示订单 **99999 不存在**。请确认一下订单号是否正确，比如是否有遗漏的数字、多余的空格或连字符等。如果确认无误，建议重新核对后再查。"
   },
   {
     "id": "chat-04",
@@ -642,12 +644,12 @@
     "got": "chitchat/-",
     "route_ok": true,
     "hit": null,
-    "latency": 4.16,
+    "latency": 4.24,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "哈哈，确实是个好天气！适合骑车兜风。有什么需要帮忙的吗？比如在看的车型或者订单问题？"
+    "answer": "是的呢,今天确实是个骑摩托车兜风的好天气。请问有什么可以帮您的吗？"
   },
   {
     "id": "mi-01",
@@ -656,12 +658,12 @@
     "got": "qa/compatibility+action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 13.67,
+    "latency": 12.79,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已成功为您预约 **2026年7月20日** 的保养服务。请您届时按时到店进行保养哦！😊 此外，Ninja 400适用的火花塞型号为 **NGK CPR8EA-9**，零件号 **CPR8EA-9**，适用于 **2018 至 2023 年款**。"
+    "answer": "已成功为您预约 **2026年7月20日** 的**保养服务**，请按时到店即可。关于您询问的火花塞，Ninja 400的型号为NGK CPR8EA-9（零件号：CPR8EA-9），适用于2018至2023年款。"
   },
   {
     "id": "mi-02",
@@ -670,12 +672,12 @@
     "got": "qa/knowledge+action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 14.63,
+    "latency": 20.48,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "您查询的订单 **12346** 信息如下：\n\n- **商品**：DID 520 链条\n- **状态**：🚚 **配送中**\n\n该订单目前正在配送路上，请您留意查收。如果您需要更详细的物流轨迹信息，系统暂不支持查询具体配送位置，建议您联系快递公司获取实时进度。还有其他可以帮您的吗？另外，火花塞电极间隙标准值为0.8至0.9毫米。"
+    "answer": "订单 **12346** 的查询结果如下：\n\n- **商品：** DID 520 链条\n- **当前状态：** 配送中 🚚\n\n目前该订单正在配送路上，请您留意物流信息并保持电话畅通，方便快递员联系您取货。如果还有其他需要，请随时告诉我！另外，关于您咨询的火花塞电极间隙，其标准值为0.8至0.9毫米。"
   },
   {
     "id": "mi-03",
@@ -684,12 +686,12 @@
     "got": "qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 6.22,
+    "latency": 6.98,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "Ninja 400的冷却液建议每3年或更换水泵时更换；刹车油建议每两年更换一次。"
+    "answer": "冷却液建议每3年或更换水泵时更换一次。刹车油建议每两年更换一次，使用DOT4规格。"
   },
   {
     "id": "mi-04",
@@ -698,14 +700,14 @@
     "got": "qa/compatibility+action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 19.25,
+    "latency": 16.69,
     "clarifies": [
-      "请问您希望预约哪一天进行保养？"
+      "请问您希望预约哪一天进行保养？请提供日期（格式：2026-07-18）。"
     ],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已成功为您预约 **2026年7月20日** 的 **保养服务**，到时候按时到店即可。请问还有其他需要帮忙的吗？关于您查询的链条，Ninja 400（2018-2023款）可选用 **DID 520 链条**，零件号为 **520VX3**。"
+    "answer": "已成功为您预约 **2026年7月20日** 的保养服务，请按时到店。请问还有其他需要帮忙的吗？另外，关于您咨询的链条，Ninja 400（2018-2023款）可使用DID 520链条，零件号为520VX3。"
   },
   {
     "id": "faqmix-01",
@@ -714,12 +716,12 @@
     "got": "FAQ+action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 13.62,
+    "latency": 20.2,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "已查到订单 **12345** 的信息如下：\n\n- **商品**：NGK CPR8EA-9 火花塞\n- **状态**：已签收\n- **签收天数**：3天\n\n请问您还需要办理什么业务？另外提醒您，本店营业时间为周一至周六9:00-18:00，周日休息。"
+    "answer": "查询结果如下：\n\n| 项目 | 内容 |\n|------|------|\n| **订单号** | 12345 |\n| **商品** | NGK CPR8EA-9 火花塞 |\n| **状态** | 已签收（签收已 3 天） |\n\n请问还需要办理其他业务吗？另外，本店营业时间为周一至周六 9:00-18:00，周日休息。"
   },
   {
     "id": "faqmix-02",
@@ -728,12 +730,12 @@
     "got": "FAQ+qa/knowledge",
     "route_ok": true,
     "hit": true,
-    "latency": 13.82,
+    "latency": 12.14,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "(无) 此外，本店营业时间为周一至周六9:00-18:00，周日休息。根据维修手册，冷却液建议每3年或更换水泵时更换一次。"
+    "answer": "(无) 关于您咨询的营业时间和保养建议，本店营业时间为周一至周六9:00-18:00，周日休息。根据您查询的车型（Ninja 400），冷却液建议每3年或更换水泵时更换。"
   },
   {
     "id": "faqmix-03",
@@ -742,7 +744,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.36,
+    "latency": 0.25,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -756,7 +758,7 @@
     "got": "FAQ",
     "route_ok": true,
     "hit": true,
-    "latency": 0.43,
+    "latency": 0.24,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -770,7 +772,7 @@
     "got": "FAQ",
     "route_ok": false,
     "hit": false,
-    "latency": 0.33,
+    "latency": 0.26,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
@@ -784,12 +786,12 @@
     "got": "FAQ+action/-",
     "route_ok": true,
     "hit": true,
-    "latency": 20.63,
+    "latency": 15.34,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "您好，订单12345的查询结果如下：\n\n- **商品**：NGK CPR8EA-9 火花塞\n- **状态**：已签收\n- **签收天数**：3天\n\n请问还有什么可以帮您办理的吗？另外，本店营业时间为周一至周六 9:00-18:00，周日休息。"
+    "answer": "订单 **12345** 的查询结果如下：\n\n- **商品**：NGK CPR8EA-9 火花塞\n- **状态**：已签收\n- **签收天数**：3天\n\n请问还有什么需要我帮忙的吗？比如需要办理退款或其他业务？另外，本店营业时间为周一至周六9:00-18:00，周日休息。"
   },
   {
     "id": "mi-05",
@@ -798,11 +800,11 @@
     "got": "complaint",
     "route_ok": true,
     "hit": null,
-    "latency": 3.0,
+    "latency": 3.78,
     "clarifies": [],
     "stuck": null,
     "unused_replies": 0,
     "ticket_id": null,
-    "answer": "非常抱歉给您带来这么不好的体验，我代表店里真诚向您道歉。您说的订单12346我已经帮您登记了工单，会有专人尽快跟进处理，请您放心。"
+    "answer": "非常理解您的不满，修得不好是我们的问题，我向您真诚道歉。订单12346我已登记工单，会安排专人尽快跟进处理，请您放心。"
   }
 ]

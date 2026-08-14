@@ -22,7 +22,11 @@ public class JwtUtil {
 
     public JwtUtil(@Value("${jwt.secret}") String secret,
                    @Value("${jwt.expiration-ms}") long expirationMs) {
-        // HS256 要求密钥 ≥ 256 bit(32 字节),配置里的默认串已够长
+        // ⚠️ 算法不是写死的,是 hmacShaKeyFor 按密钥【字节长度】推出来的:
+        //    ≥32B→HS256,≥48B→HS384,≥64B→HS512(不足 32B 直接抛 WeakKeyException)。
+        //    默认串 53 字节 → 实际签发用 HS384,而 app/api.py 把 JWT_ALG 写死成 "HS384"。
+        //    所以换 JWT_SECRET 时【长度不能跌破 48 字节】,否则这边改用 HS256 签、
+        //    Python 那边只认 HS384 → 全部请求 401,且报错不会指向密钥长度。
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
     }
